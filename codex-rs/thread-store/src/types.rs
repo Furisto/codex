@@ -6,7 +6,12 @@ use chrono::Utc;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
+use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -64,6 +69,39 @@ pub struct ThreadPersistenceMetadata {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtraConfig {}
 
+/// Durable, non-secret effective session configuration captured for remote thread recreation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StoredThreadConfigSnapshot {
+    pub version: StoredThreadConfigSnapshotVersion,
+    pub model: String,
+    pub model_provider_id: String,
+    pub service_tier: Option<String>,
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub permission_profile: PermissionProfile,
+    pub active_permission_profile: Option<ActivePermissionProfile>,
+    pub cwd: PathBuf,
+    pub workspace_roots: Vec<PathBuf>,
+    pub profile_workspace_roots: Vec<PathBuf>,
+    pub ephemeral: bool,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning_summary: Option<ReasoningSummary>,
+    pub personality: Option<Personality>,
+    pub collaboration_mode: CollaborationMode,
+    pub session_source: SessionSource,
+    pub history_mode: ThreadHistoryMode,
+    pub forked_from_thread_id: Option<ThreadId>,
+    pub parent_thread_id: Option<ThreadId>,
+    pub thread_source: Option<ThreadSource>,
+    pub originator: String,
+}
+
+/// Schema version for [`StoredThreadConfigSnapshot`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StoredThreadConfigSnapshotVersion {
+    V1,
+}
+
 /// Parameters required to create a persisted thread.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateThreadParams {
@@ -73,6 +111,8 @@ pub struct CreateThreadParams {
     pub thread_id: ThreadId,
     /// Optional extra configuration fields for the thread.
     pub extra_config: Option<ExtraConfig>,
+    /// Durable non-secret effective session config for cold remote resume.
+    pub config_snapshot: Option<StoredThreadConfigSnapshot>,
     /// Source thread id when this thread is created as a fork.
     pub forked_from_id: Option<ThreadId>,
     /// The ID of the parent thread. This will only be set if this thread is a subagent.
@@ -417,6 +457,8 @@ pub struct StoredThread {
     pub thread_id: ThreadId,
     /// Optional extra configuration fields for the thread.
     pub extra_config: Option<ExtraConfig>,
+    /// Durable non-secret effective session config for cold remote resume.
+    pub config_snapshot: Option<StoredThreadConfigSnapshot>,
     /// Local rollout path when the backing store is filesystem-based.
     pub rollout_path: Option<PathBuf>,
     /// Source thread id when this thread was forked from another thread.

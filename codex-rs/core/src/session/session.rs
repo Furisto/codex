@@ -19,6 +19,8 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelections;
+use codex_thread_store::StoredThreadConfigSnapshot;
+use codex_thread_store::StoredThreadConfigSnapshotVersion;
 use std::sync::OnceLock;
 use tokio::sync::Semaphore;
 
@@ -414,6 +416,44 @@ impl SessionConfiguration {
     }
 }
 
+fn stored_thread_config_snapshot_from_session(
+    snapshot: ThreadConfigSnapshot,
+) -> StoredThreadConfigSnapshot {
+    let cwd = snapshot.cwd().to_path_buf();
+    StoredThreadConfigSnapshot {
+        version: StoredThreadConfigSnapshotVersion::V1,
+        model: snapshot.model,
+        model_provider_id: snapshot.model_provider_id,
+        service_tier: snapshot.service_tier,
+        approval_policy: snapshot.approval_policy,
+        approvals_reviewer: snapshot.approvals_reviewer,
+        permission_profile: snapshot.permission_profile,
+        active_permission_profile: snapshot.active_permission_profile,
+        cwd,
+        workspace_roots: snapshot
+            .workspace_roots
+            .into_iter()
+            .map(AbsolutePathBuf::into_path_buf)
+            .collect(),
+        profile_workspace_roots: snapshot
+            .profile_workspace_roots
+            .into_iter()
+            .map(AbsolutePathBuf::into_path_buf)
+            .collect(),
+        ephemeral: snapshot.ephemeral,
+        reasoning_effort: snapshot.reasoning_effort,
+        reasoning_summary: snapshot.reasoning_summary,
+        personality: snapshot.personality,
+        collaboration_mode: snapshot.collaboration_mode,
+        session_source: snapshot.session_source,
+        history_mode: snapshot.history_mode,
+        forked_from_thread_id: snapshot.forked_from_thread_id,
+        parent_thread_id: snapshot.parent_thread_id,
+        thread_source: snapshot.thread_source,
+        originator: snapshot.originator,
+    }
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct SessionSettingsUpdate {
     pub(crate) environments: Option<TurnEnvironmentSelections>,
@@ -592,6 +632,9 @@ impl Session {
                             session_id,
                             thread_id,
                             extra_config: config.extra_config.clone(),
+                            config_snapshot: Some(stored_thread_config_snapshot_from_session(
+                                session_configuration.thread_config_snapshot(),
+                            )),
                             forked_from_id,
                             parent_thread_id,
                             source: session_source,

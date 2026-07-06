@@ -452,6 +452,7 @@ use codex_thread_store::ReadThreadParams as StoreReadThreadParams;
 use codex_thread_store::SearchThreadsParams as StoreSearchThreadsParams;
 use codex_thread_store::SortDirection as StoreSortDirection;
 use codex_thread_store::StoredThread;
+use codex_thread_store::StoredThreadConfigSnapshot;
 use codex_thread_store::ThreadMetadataPatch as StoreThreadMetadataPatch;
 use codex_thread_store::ThreadRelationFilter as StoreThreadRelationFilter;
 use codex_thread_store::ThreadSortKey as StoreThreadSortKey;

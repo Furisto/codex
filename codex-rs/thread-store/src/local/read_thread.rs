@@ -358,6 +358,7 @@ async fn stored_thread_from_sqlite_metadata(
     Ok(StoredThread {
         thread_id: metadata.id,
         extra_config: None,
+        config_snapshot: None,
         rollout_path: Some(rollout_path),
         forked_from_id,
         parent_thread_id,
@@ -432,6 +433,7 @@ fn stored_thread_from_meta_line(
     StoredThread {
         thread_id: meta_line.meta.id,
         extra_config: None,
+        config_snapshot: None,
         rollout_path: Some(rollout_path),
         forked_from_id: meta_line.meta.forked_from_id,
         parent_thread_id: meta_line.meta.parent_thread_id,

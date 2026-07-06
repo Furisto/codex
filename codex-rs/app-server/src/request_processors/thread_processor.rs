@@ -164,6 +164,83 @@ fn merge_persisted_resume_metadata(
     }
 }
 
+fn apply_thread_store_config_snapshot_to_resume_overrides(
+    request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
+    typesafe_overrides: &mut ConfigOverrides,
+    config_snapshot: &StoredThreadConfigSnapshot,
+) -> Result<(), JSONRPCErrorError> {
+    if typesafe_overrides.model.is_none() {
+        typesafe_overrides.model = Some(config_snapshot.model.clone());
+    }
+    if typesafe_overrides.model_provider.is_none() {
+        typesafe_overrides.model_provider = Some(config_snapshot.model_provider_id.clone());
+    }
+    if typesafe_overrides.service_tier.is_none() {
+        typesafe_overrides.service_tier = Some(config_snapshot.service_tier.clone());
+    }
+    if typesafe_overrides.cwd.is_none() {
+        let cwd = AbsolutePathBuf::from_absolute_path_checked(&config_snapshot.cwd)
+            .map_err(|err| {
+                invalid_params(format!(
+                    "invalid persisted thread config cwd `{}`: {err}",
+                    config_snapshot.cwd.display()
+                ))
+            })?
+            .into_path_buf();
+        typesafe_overrides.cwd = Some(cwd);
+    }
+    if typesafe_overrides.workspace_roots.is_none() {
+        let workspace_roots = config_snapshot
+            .workspace_roots
+            .iter()
+            .map(|workspace_root| {
+                AbsolutePathBuf::from_absolute_path_checked(workspace_root).map_err(|err| {
+                    invalid_params(format!(
+                        "invalid persisted thread config workspace root `{}`: {err}",
+                        workspace_root.display()
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        typesafe_overrides.workspace_roots = Some(workspace_roots);
+    }
+    if typesafe_overrides.approval_policy.is_none() {
+        typesafe_overrides.approval_policy = Some(config_snapshot.approval_policy);
+    }
+    if typesafe_overrides.approvals_reviewer.is_none() {
+        typesafe_overrides.approvals_reviewer = Some(config_snapshot.approvals_reviewer);
+    }
+    if typesafe_overrides.sandbox_mode.is_none()
+        && typesafe_overrides.default_permissions.is_none()
+        && typesafe_overrides.permission_profile.is_none()
+    {
+        typesafe_overrides.permission_profile = Some(config_snapshot.permission_profile.clone());
+    }
+    if typesafe_overrides.personality.is_none() {
+        typesafe_overrides.personality = config_snapshot.personality;
+    }
+    if typesafe_overrides.ephemeral.is_none() {
+        typesafe_overrides.ephemeral = Some(config_snapshot.ephemeral);
+    }
+
+    let request_overrides = request_overrides.get_or_insert_with(HashMap::new);
+    if !request_overrides.contains_key("model_reasoning_effort")
+        && let Some(reasoning_effort) = config_snapshot.reasoning_effort.as_ref()
+    {
+        request_overrides.insert(
+            "model_reasoning_effort".to_string(),
+            serde_json::Value::String(reasoning_effort.to_string()),
+        );
+    }
+    if !request_overrides.contains_key("model_reasoning_summary")
+        && let Some(reasoning_summary) = config_snapshot.reasoning_summary
+        && let Ok(value) = serde_json::to_value(reasoning_summary)
+    {
+        request_overrides.insert("model_reasoning_summary".to_string(), value);
+    }
+    Ok(())
+}
+
 fn normalize_thread_list_cwd_filters(
     cwd: Option<ThreadListCwdFilter>,
 ) -> Result<Option<Vec<PathBuf>>, JSONRPCErrorError> {
@@ -2733,12 +2810,26 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
-        self.load_and_apply_persisted_resume_metadata(
-            &thread_history,
-            &mut request_overrides,
-            &mut typesafe_overrides,
-        )
-        .await;
+        let stored_config_snapshot = resume_source_thread
+            .as_ref()
+            .and_then(|thread| thread.config_snapshot.clone());
+        if let Some(config_snapshot) = stored_config_snapshot.as_ref() {
+            if let Err(error) = apply_thread_store_config_snapshot_to_resume_overrides(
+                &mut request_overrides,
+                &mut typesafe_overrides,
+                config_snapshot,
+            ) {
+                self.outgoing.send_error(request_id, error).await;
+                return Ok(());
+            }
+        } else {
+            self.load_and_apply_persisted_resume_metadata(
+                &thread_history,
+                &mut request_overrides,
+                &mut typesafe_overrides,
+            )
+            .await;
+        }
 
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
         let config = match self

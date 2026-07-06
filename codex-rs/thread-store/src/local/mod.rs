@@ -1271,6 +1271,7 @@ mod tests {
             session_id: thread_id.into(),
             thread_id,
             extra_config: None,
+            config_snapshot: None,
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,

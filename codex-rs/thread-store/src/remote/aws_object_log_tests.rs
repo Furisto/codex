@@ -1,5 +1,10 @@
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
 use codex_protocol::models::BaseInstructions;
+use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionContextWindow;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
@@ -13,6 +18,9 @@ use crate::AwsObjectLogAppendOptions;
 use crate::AwsObjectLogThreadStore;
 use crate::CreateThreadParams;
 use crate::LoadThreadHistoryParams;
+use crate::ReadThreadParams;
+use crate::StoredThreadConfigSnapshot;
+use crate::StoredThreadConfigSnapshotVersion;
 use crate::ThreadPersistenceMetadata;
 use crate::ThreadStoreError;
 
@@ -61,6 +69,28 @@ async fn append_commits_payload_pointer_and_ordered_history() {
             "tenants/default/threads/{thread_id}/commits/00000000000000000002-00000000000000000002.json"
         )
     );
+}
+
+#[tokio::test]
+async fn create_thread_persists_config_snapshot_on_stored_thread() {
+    let store = AwsObjectLogThreadStore::default();
+    let thread_id = ThreadId::default();
+    let snapshot = stored_config_snapshot();
+    let mut params = create_thread_params(thread_id);
+    params.config_snapshot = Some(snapshot.clone());
+
+    store.create_thread(params).await.expect("create thread");
+
+    let stored_thread = store
+        .read_thread(ReadThreadParams {
+            thread_id,
+            include_archived: false,
+            include_history: false,
+        })
+        .await
+        .expect("read thread");
+
+    assert_eq!(stored_thread.config_snapshot, Some(snapshot));
 }
 
 #[tokio::test]
@@ -173,6 +203,7 @@ fn create_thread_params(thread_id: ThreadId) -> CreateThreadParams {
         session_id: thread_id.into(),
         thread_id,
         extra_config: None,
+        config_snapshot: None,
         forked_from_id: None,
         parent_thread_id: None,
         source: SessionSource::Exec,
@@ -189,6 +220,41 @@ fn create_thread_params(thread_id: ThreadId) -> CreateThreadParams {
             model_provider: "test-provider".to_string(),
             memory_mode: ThreadMemoryMode::Enabled,
         },
+    }
+}
+
+fn stored_config_snapshot() -> StoredThreadConfigSnapshot {
+    let cwd = std::env::current_dir().expect("current dir");
+    StoredThreadConfigSnapshot {
+        version: StoredThreadConfigSnapshotVersion::V1,
+        model: "snapshot-model".to_string(),
+        model_provider_id: "snapshot-provider".to_string(),
+        service_tier: Some("priority".to_string()),
+        approval_policy: codex_protocol::protocol::AskForApproval::OnRequest,
+        approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
+        permission_profile: PermissionProfile::read_only(),
+        active_permission_profile: None,
+        cwd: cwd.clone(),
+        workspace_roots: vec![cwd],
+        profile_workspace_roots: Vec::new(),
+        ephemeral: false,
+        reasoning_effort: Some(ReasoningEffort::High),
+        reasoning_summary: None,
+        personality: None,
+        collaboration_mode: CollaborationMode {
+            mode: ModeKind::Default,
+            settings: Settings {
+                model: "snapshot-model".to_string(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                developer_instructions: None,
+            },
+        },
+        session_source: SessionSource::Exec,
+        history_mode: ThreadHistoryMode::Legacy,
+        forked_from_thread_id: None,
+        parent_thread_id: None,
+        thread_source: None,
+        originator: "test_originator".to_string(),
     }
 }
 

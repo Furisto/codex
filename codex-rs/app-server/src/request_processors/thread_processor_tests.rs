@@ -139,6 +139,8 @@ mod thread_processor_behavior_tests {
     use codex_protocol::protocol::TurnEnvironmentSelections;
     use codex_state::ThreadMetadataBuilder;
     use codex_thread_store::StoredThread;
+    use codex_thread_store::StoredThreadConfigSnapshot;
+    use codex_thread_store::StoredThreadConfigSnapshotVersion;
     use codex_utils_absolute_path::test_support::PathBufExt;
     use codex_utils_absolute_path::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
@@ -468,6 +470,7 @@ mod thread_processor_behavior_tests {
         let stored_thread = StoredThread {
             thread_id,
             extra_config: None,
+            config_snapshot: None,
             rollout_path: Some(PathBuf::from("/tmp/thread.jsonl")),
             forked_from_id: None,
             parent_thread_id: None,
@@ -809,6 +812,46 @@ mod thread_processor_behavior_tests {
         Ok(metadata)
     }
 
+    fn test_stored_config_snapshot(
+        cwd: codex_utils_absolute_path::AbsolutePathBuf,
+        workspace_roots: Vec<codex_utils_absolute_path::AbsolutePathBuf>,
+    ) -> StoredThreadConfigSnapshot {
+        StoredThreadConfigSnapshot {
+            version: StoredThreadConfigSnapshotVersion::V1,
+            model: "snapshot-model".to_string(),
+            model_provider_id: "snapshot-provider".to_string(),
+            service_tier: Some("priority".to_string()),
+            approval_policy: codex_protocol::protocol::AskForApproval::OnRequest,
+            approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
+            permission_profile: PermissionProfile::read_only(),
+            active_permission_profile: None,
+            cwd: cwd.into_path_buf(),
+            workspace_roots: workspace_roots
+                .into_iter()
+                .map(codex_utils_absolute_path::AbsolutePathBuf::into_path_buf)
+                .collect(),
+            profile_workspace_roots: Vec::new(),
+            ephemeral: false,
+            reasoning_effort: Some(ReasoningEffort::High),
+            reasoning_summary: None,
+            personality: None,
+            collaboration_mode: CollaborationMode {
+                mode: ModeKind::Default,
+                settings: Settings {
+                    model: "snapshot-model".to_string(),
+                    reasoning_effort: Some(ReasoningEffort::High),
+                    developer_instructions: None,
+                },
+            },
+            session_source: SessionSource::Cli,
+            history_mode: Default::default(),
+            forked_from_thread_id: None,
+            parent_thread_id: None,
+            thread_source: None,
+            originator: "test_originator".to_string(),
+        }
+    }
+
     #[test]
     fn summary_from_thread_metadata_formats_protocol_timestamps_as_seconds() -> Result<()> {
         let mut metadata =
@@ -988,6 +1031,98 @@ mod thread_processor_behavior_tests {
             Some("mock_provider".to_string())
         );
         assert_eq!(request_overrides, None);
+        Ok(())
+    }
+
+    #[test]
+    fn thread_store_config_snapshot_supplies_cold_resume_base_values() -> Result<()> {
+        let cwd = test_path_buf("/tmp/snapshot-cwd").abs();
+        let workspace_root = test_path_buf("/tmp/workspace").abs();
+        let snapshot = test_stored_config_snapshot(cwd.clone(), vec![workspace_root.clone()]);
+        let mut request_overrides = None;
+        let mut typesafe_overrides = ConfigOverrides::default();
+
+        apply_thread_store_config_snapshot_to_resume_overrides(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &snapshot,
+        )?;
+
+        assert_eq!(typesafe_overrides.model, Some("snapshot-model".to_string()));
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("snapshot-provider".to_string())
+        );
+        assert_eq!(
+            typesafe_overrides.service_tier,
+            Some(Some("priority".to_string()))
+        );
+        assert_eq!(typesafe_overrides.cwd, Some(cwd.to_path_buf()));
+        assert_eq!(
+            typesafe_overrides.workspace_roots,
+            Some(vec![workspace_root])
+        );
+        assert_eq!(
+            typesafe_overrides.approval_policy,
+            Some(codex_protocol::protocol::AskForApproval::OnRequest)
+        );
+        assert_eq!(
+            typesafe_overrides.approvals_reviewer,
+            Some(codex_protocol::config_types::ApprovalsReviewer::User)
+        );
+        assert_eq!(
+            typesafe_overrides.permission_profile,
+            Some(PermissionProfile::read_only())
+        );
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model_reasoning_effort".to_string(),
+                serde_json::Value::String("high".to_string()),
+            )]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn thread_store_config_snapshot_preserves_explicit_resume_overrides() -> Result<()> {
+        let cwd = test_path_buf("/tmp/snapshot-cwd").abs();
+        let snapshot = test_stored_config_snapshot(cwd, Vec::new());
+        let mut request_overrides = Some(HashMap::from([(
+            "model_reasoning_effort".to_string(),
+            serde_json::Value::String("low".to_string()),
+        )]));
+        let mut typesafe_overrides = ConfigOverrides {
+            model: Some("request-model".to_string()),
+            model_provider: Some("request-provider".to_string()),
+            cwd: Some(PathBuf::from("/tmp/request-cwd")),
+            sandbox_mode: Some(codex_protocol::protocol::SandboxMode::ReadOnly),
+            ..Default::default()
+        };
+
+        apply_thread_store_config_snapshot_to_resume_overrides(
+            &mut request_overrides,
+            &mut typesafe_overrides,
+            &snapshot,
+        )?;
+
+        assert_eq!(typesafe_overrides.model, Some("request-model".to_string()));
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("request-provider".to_string())
+        );
+        assert_eq!(
+            typesafe_overrides.cwd,
+            Some(PathBuf::from("/tmp/request-cwd"))
+        );
+        assert_eq!(typesafe_overrides.permission_profile, None);
+        assert_eq!(
+            request_overrides,
+            Some(HashMap::from([(
+                "model_reasoning_effort".to_string(),
+                serde_json::Value::String("low".to_string()),
+            )]))
+        );
         Ok(())
     }
 

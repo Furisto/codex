@@ -2272,6 +2272,7 @@ mod tests {
         let stored_thread = StoredThread {
             thread_id,
             extra_config: None,
+            config_snapshot: None,
             rollout_path: None,
             forked_from_id: None,
             parent_thread_id: None,

@@ -31,6 +31,7 @@ fn stored_thread(cwd: &str, title: &str, first_user_message: &str) -> StoredThre
     StoredThread {
         thread_id: ThreadId::new(),
         extra_config: None,
+        config_snapshot: None,
         rollout_path: Some(PathBuf::from("/tmp/rollout.jsonl")),
         forked_from_id: None,
         parent_thread_id: None,

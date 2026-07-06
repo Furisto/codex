@@ -122,6 +122,7 @@ mod tests {
                     session_id: thread_id.into(),
                     thread_id,
                     extra_config: None,
+                    config_snapshot: None,
                     forked_from_id: None,
                     parent_thread_id,
                     source: SessionSource::Exec,
@@ -317,6 +318,7 @@ mod tests {
             session_id: thread_id.into(),
             thread_id,
             extra_config: None,
+            config_snapshot: None,
             forked_from_id: None,
             parent_thread_id: None,
             source: SessionSource::Exec,
@@ -756,6 +758,7 @@ fn stored_thread_from_state(
     Ok(StoredThread {
         thread_id,
         extra_config: created.extra_config.clone(),
+        config_snapshot: None,
         rollout_path: metadata
             .and_then(|metadata| metadata.rollout_path.clone())
             .or(rollout_path),

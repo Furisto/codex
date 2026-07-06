@@ -32,6 +32,7 @@ use crate::ResumeThreadParams;
 use crate::SearchThreadsParams;
 use crate::SortDirection;
 use crate::StoredThread;
+use crate::StoredThreadConfigSnapshot;
 use crate::StoredThreadHistory;
 use crate::ThreadMetadataPatch;
 use crate::ThreadPage;
@@ -109,6 +110,7 @@ struct AwsObjectLogThreadStoreState {
 struct AwsObjectLogThreadHead {
     thread_id: ThreadId,
     extra_config: Option<ExtraConfig>,
+    config_snapshot: Option<StoredThreadConfigSnapshot>,
     forked_from_id: Option<ThreadId>,
     parent_thread_id: Option<ThreadId>,
     history_mode: ThreadHistoryMode,
@@ -273,6 +275,7 @@ impl AwsObjectLogThreadStore {
         let head = AwsObjectLogThreadHead {
             thread_id: params.thread_id,
             extra_config: params.extra_config.clone(),
+            config_snapshot: params.config_snapshot.clone(),
             forked_from_id: params.forked_from_id,
             parent_thread_id: params.parent_thread_id,
             history_mode: params.history_mode,
@@ -744,6 +747,7 @@ fn import_history(
         AwsObjectLogThreadHead {
             thread_id,
             extra_config: None,
+            config_snapshot: None,
             forked_from_id: session_meta.and_then(|meta| meta.forked_from_id),
             parent_thread_id: session_meta.and_then(|meta| meta.parent_thread_id),
             history_mode,
@@ -923,6 +927,7 @@ fn stored_thread_from_head(
     Ok(StoredThread {
         thread_id: head.thread_id,
         extra_config: head.extra_config.clone(),
+        config_snapshot: head.config_snapshot.clone(),
         rollout_path: head.metadata.rollout_path.clone(),
         forked_from_id: head.forked_from_id,
         parent_thread_id: head.parent_thread_id,
