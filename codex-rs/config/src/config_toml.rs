@@ -558,6 +558,10 @@ pub enum ThreadStoreToml {
     InMemory {
         id: String,
     },
+    AwsObjectLog {
+        namespace: String,
+        payload_prefix: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

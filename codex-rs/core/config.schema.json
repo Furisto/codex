@@ -2903,6 +2903,27 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "namespace": {
+              "type": "string"
+            },
+            "payload_prefix": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "aws_object_log"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace",
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },

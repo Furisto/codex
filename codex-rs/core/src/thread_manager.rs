@@ -63,6 +63,8 @@ use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::state_db::StateDbHandle;
+use codex_thread_store::AwsObjectLogThreadStore;
+use codex_thread_store::AwsObjectLogThreadStoreConfig;
 use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
@@ -288,6 +290,17 @@ pub fn thread_store_from_config(
             ))
         }
         ThreadStoreConfig::InMemory { id } => InMemoryThreadStore::for_id(id),
+        ThreadStoreConfig::AwsObjectLog {
+            namespace,
+            payload_prefix,
+        } => Arc::new(AwsObjectLogThreadStore::new(
+            AwsObjectLogThreadStoreConfig {
+                namespace: namespace.clone(),
+                payload_prefix: payload_prefix
+                    .clone()
+                    .unwrap_or_else(|| format!("tenants/{namespace}/threads")),
+            },
+        )),
     }
 }
 

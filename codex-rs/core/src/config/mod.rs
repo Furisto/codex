@@ -602,6 +602,11 @@ pub enum ThreadStoreConfig {
     Local,
     /// In-memory thread store for test and debug configurations.
     InMemory { id: String },
+    /// AWS object-log thread store for shared durable persistence.
+    AwsObjectLog {
+        namespace: String,
+        payload_prefix: Option<String>,
+    },
 }
 
 /// Application configuration loaded from disk and merged with overrides.
@@ -2231,6 +2236,13 @@ fn thread_store_config(thread_store: Option<ThreadStoreToml>) -> ThreadStoreConf
     match thread_store {
         Some(ThreadStoreToml::Local {}) => ThreadStoreConfig::Local,
         Some(ThreadStoreToml::InMemory { id }) => ThreadStoreConfig::InMemory { id },
+        Some(ThreadStoreToml::AwsObjectLog {
+            namespace,
+            payload_prefix,
+        }) => ThreadStoreConfig::AwsObjectLog {
+            namespace,
+            payload_prefix,
+        },
         None => ThreadStoreConfig::Local,
     }
 }
