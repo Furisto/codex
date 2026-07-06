@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversation Flow Technical Sequence</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-2: #eef2f6;
+      --text: #17202a;
+      --muted: #52606d;
+      --border: #d7dde5;
+      --accent: #1264a3;
+      --accent-2: #0b6b57;
+      --risk: #9a4b00;
+      --uncertain: #7c3aed;
+      --code-bg: #101820;
+      --code-text: #eef6ff;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .hero {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 48px 24px 28px;
+    }
+
+    .eyebrow {
+      color: var(--accent-2);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 10px 0 14px;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 920px;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 24px;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+      align-items: start;
+    }
+
+    nav {
+      position: sticky;
+      top: 16px;
+      max-height: calc(100vh - 32px);
+      overflow: auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    nav h2 {
+      font-size: 0.9rem;
+      margin: 0 0 8px;
+    }
+
+    nav ol {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    nav li {
+      margin: 7px 0;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 1.55rem;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 26px 0 10px;
+      font-size: 1.08rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 22px;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      background: var(--surface-2);
+      border-radius: 4px;
+      padding: 0.1em 0.32em;
+    }
+
+    pre {
+      margin: 14px 0;
+      padding: 16px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .mini-card {
+      background: #fbfcfe;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .mini-card strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: #f1f7fc;
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 14px 0;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .risk {
+      border-left-color: var(--risk);
+      background: #fff7ed;
+    }
+
+    .uncertain {
+      border-left-color: var(--uncertain);
+      background: #f6f1ff;
+    }
+
+    .definition {
+      border-left-color: var(--accent-2);
+      background: #eefaf6;
+    }
+
+    .diagram {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: linear-gradient(180deg, #ffffff, #f8fafc);
+      padding: 16px;
+      margin: 16px 0;
+      overflow-x: auto;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(128px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+      min-width: 880px;
+    }
+
+    .node {
+      min-height: 86px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 10px;
+      position: relative;
+    }
+
+    .node::after {
+      content: "";
+      position: absolute;
+      top: 42px;
+      right: -11px;
+      width: 11px;
+      height: 2px;
+      background: var(--accent);
+    }
+
+    .node:last-child::after {
+      display: none;
+    }
+
+    .node .label {
+      font-weight: 700;
+      margin-bottom: 5px;
+    }
+
+    .node .detail {
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .state-map {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      gap: 10px;
+      min-width: 720px;
+    }
+
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      margin: 2px;
+      background: #fff;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 0.94rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 9px 10px;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--surface-2);
+      text-align: left;
+    }
+
+    .source {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .source code {
+      color: var(--text);
+    }
+
+    .checklist li::marker {
+      color: var(--accent-2);
+    }
+
+    @media (max-width: 960px) {
+      .layout {
+        grid-template-columns: 1fr;
+        padding: 16px;
+      }
+
+      nav {
+        position: static;
+        max-height: none;
+      }
+
+      section {
+        padding: 20px;
+      }
+
+      .grid,
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="hero">
+      <div class="eyebrow">Source-backed technical sequence</div>
+      <h1>Conversation Flow: Create Thread, Send Message, Stream Agent Response</h1>
+      <p class="subtitle">This document maps the v2 app-server conversation lifecycle from the client-visible JSON-RPC API through app-server request processors, core session execution, model streaming, event translation, and durable rollout persistence. It is written for engineers preparing to make broad changes in this area.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav aria-label="Table of contents">
+      <h2>Contents</h2>
+      <ol id="toc">
+        <li><a href="#executive-map">Executive Map</a></li>
+        <li><a href="#feature-boundary">Feature Boundary</a></li>
+        <li><a href="#component-graph">Component and Dependency Graph</a></li>
+        <li><a href="#ids-state">IDs and State Model</a></li>
+        <li><a href="#persistence">Persistence Inventory</a></li>
+        <li><a href="#async">Async Handoff Inventory</a></li>
+        <li><a href="#history">Evolutionary History</a></li>
+        <li><a href="#assumptions">Explicit Assumptions</a></li>
+        <li><a href="#sequence">End-to-End Sequence</a></li>
+        <li><a href="#walkthrough">Code Walkthrough</a></li>
+        <li><a href="#change-guide">Change Guide</a></li>
+        <li><a href="#tests-observability">Tests and Observability</a></li>
+        <li><a href="#risks">Risks and Edge Cases</a></li>
+        <li><a href="#uncertainties">Uncertainties</a></li>
+        <li><a href="#self-audit">Final Self-Audit</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="executive-map">
+        <h2>1. Executive Map</h2>
+        <p>The conversation feature is the v2 JSON-RPC thread and turn flow: create or resume a thread, submit user input as a turn, run the agent/model/tool loop, persist replayable history, and stream notifications back to subscribed clients. The app-server README describes the visible lifecycle: call <code>thread/start</code>, call <code>turn/start</code>, then keep reading notifications such as <code>turn/started</code>, <code>item/started</code>, <code>item/agentMessage/delta</code>, <code>item/completed</code>, and <code>turn/completed</code>. <span class="source">Evidence: <code>codex-rs/app-server/README.md:77-80</code>, <code>codex-rs/app-server/README.md:1353-1355</code>.</span></p>
+
+        <div class="summary-grid">
+          <div class="mini-card"><strong>Primary entry points</strong><code>thread/start</code>, <code>thread/resume</code>, <code>thread/fork</code>, <code>turn/start</code>, <code>turn/steer</code>, <code>turn/interrupt</code>. <span class="source">Protocol definitions: <code>app-server-protocol/src/protocol/common.rs:476-492</code>, <code>799-814</code>.</span></div>
+          <div class="mini-card"><strong>Main components</strong>TUI/app clients, app-server processors, <code>ThreadStateManager</code>, <code>ThreadManager</code>, <code>CodexThread</code>, core <code>Session</code>, <code>ModelClientSession</code>, <code>ThreadStore</code>.</div>
+          <div class="mini-card"><strong>Main durable state</strong>Rollout items plus metadata. Local storage writes canonical JSONL history and uses SQLite as a queryable metadata index when available. <span class="source"><code>thread-store/src/local/mod.rs:45-57</code>.</span></div>
+          <div class="mini-card"><strong>Main async handoffs</strong>JSON-RPC requests, background <code>thread_start_task</code>, core submission queue, core event queue, per-thread listener task, model response stream, tool futures.</div>
+          <div class="mini-card"><strong>Main lifecycle</strong><code>thread/start</code> creates a live core thread and attaches a listener; <code>turn/start</code> queues <code>Op::UserInput</code>; core emits events; app-server converts events into notifications.</div>
+          <div class="mini-card"><strong>Open first</strong><code>app-server/src/request_processors/thread_processor.rs</code>, <code>turn_processor.rs</code>, <code>thread_lifecycle.rs</code>, <code>core/src/session/handlers.rs</code>, <code>core/src/session/turn.rs</code>, <code>thread-store/src/live_thread.rs</code>.</div>
+        </div>
+
+        <div class="callout risk">
+          <strong>Highest-risk invariants</strong>
+          Turn IDs are core submission IDs and are UUIDv7; app-server exposes them as public turn IDs. Settings updates and user turns are serialized through the same core submission loop. The per-thread listener must track core events before emitting v2 notifications. Terminal turn events are explicitly flushed after being appended to rollout storage. <span class="source">Evidence: <code>core/src/session/mod.rs:890-897</code>, <code>core/src/session/handlers.rs:702-765</code>, <code>app-server/src/request_processors/thread_lifecycle.rs:311-341</code>, <code>core/src/tasks/mod.rs:799-803</code>.</span>
+        </div>
+      </section>
+
+      <section id="feature-boundary">
+        <h2>2. Feature Boundary</h2>
+        <p>In scope: the app-server v2 JSON-RPC APIs for starting/resuming/forking threads and starting/steering/interrupting turns; the app-server process-local thread subscription/listener state; core thread/session execution; model Responses streaming; item and turn notifications; and rollout/thread-store persistence.</p>
+        <p>Out of scope except where they affect the sequence: realtime conversation APIs, review-specific delivery modes, plugin installation, MCP server startup details, environment management internals, memory jobs, and UI rendering. These systems call into or are called by the conversation flow, but they are not the primary path for “create conversation, send message, get agent response.”</p>
+        <p>The public API boundary is v2 JSON-RPC. <code>common.rs</code> maps method names to request and response payloads, while notification definitions list the server-initiated stream that clients receive. <span class="source">Evidence: <code>app-server-protocol/src/protocol/common.rs:476-492</code>, <code>799-814</code>, <code>1607-1635</code>.</span></p>
+        <p>The core boundary is <code>CodexThread</code>: app-server submits <code>Op</code>s to it and reads <code>Event</code>s from it. The protocol crate defines <code>Submission</code>, <code>Op::UserInput</code>, and <code>EventMsg</code> as the transport between app-server-facing core handles and the session loop. <span class="source">Evidence: <code>protocol/src/protocol.rs:161-166</code>, <code>515-545</code>, <code>1254-1324</code>.</span></p>
+      </section>
+
+      <section id="component-graph">
+        <h2>3. Component and Dependency Graph</h2>
+        <div class="diagram" aria-label="Conversation control flow diagram">
+          <div class="flow">
+            <div class="node"><div class="label">Client / TUI</div><div class="detail">Sends JSON-RPC <code>thread/start</code>, <code>turn/start</code>; reads notifications.</div></div>
+            <div class="node"><div class="label">MessageProcessor</div><div class="detail">Owns process-scoped <code>ThreadStore</code>, <code>ThreadManager</code>, processors.</div></div>
+            <div class="node"><div class="label">Thread / Turn Processors</div><div class="detail">Create/resume threads; map turn params to <code>Op::UserInput</code>.</div></div>
+            <div class="node"><div class="label">CodexThread</div><div class="detail">Core conduit: submit ops and await events.</div></div>
+            <div class="node"><div class="label">Session Loop</div><div class="detail">Serializes submissions, starts one active task, runs <code>run_turn</code>.</div></div>
+            <div class="node"><div class="label">Model / Tools</div><div class="detail">Streams Responses events, runs tools, may loop for follow-up.</div></div>
+            <div class="node"><div class="label">Listener / Notifications</div><div class="detail">Tracks events, translates to v2 notifications, sends to subscribers.</div></div>
+          </div>
+        </div>
+
+        <h3>Inbound Callers</h3>
+        <ul>
+          <li>The TUI starts a thread by sending <code>ClientRequest::ThreadStart</code> with <code>ThreadStartParams</code> derived from config. <span class="source">Evidence: <code>tui/src/app_server_session.rs:461-480</code>, <code>1402-1432</code>.</span></li>
+          <li>The TUI sends user input by calling <code>turn_start</code>, which emits <code>ClientRequest::TurnStart</code> with <code>thread_id</code>, input items, cwd, model, effort, permissions, and other overrides. <span class="source">Evidence: <code>tui/src/app_server_session.rs:772-820</code>.</span></li>
+          <li>Other app-server clients use the same v2 JSON-RPC methods; the README’s examples and method list document that API surface. <span class="source">Evidence: <code>app-server/README.md:140-143</code>, <code>171</code>, <code>731-769</code>.</span></li>
+        </ul>
+
+        <h3>Outbound Dependencies</h3>
+        <ul>
+          <li>Model Responses API over WebSocket or HTTPS. <code>ModelClientSession::stream</code> tries WebSocket when enabled and falls back to HTTP when required; both paths build a streaming Responses request. <span class="source">Evidence: <code>core/src/client.rs:1728-1777</code>, <code>1351-1424</code>, <code>1465-1628</code>.</span></li>
+          <li>Thread storage through the storage-neutral <code>ThreadStore</code> trait; local implementation writes JSONL rollout history and optional SQLite metadata. <span class="source">Evidence: <code>thread-store/src/store.rs:29-138</code>, <code>thread-store/src/local/mod.rs:45-57</code>.</span></li>
+          <li>Tools, plugins, MCP tools, dynamic tools, approvals, and environments are reachable during a turn. Tool availability is built in <code>built_tools</code> before each sampling request. <span class="source">Evidence: <code>core/src/session/turn.rs:1177-1305</code>.</span></li>
+        </ul>
+      </section>
+
+      <section id="ids-state">
+        <h2>4. IDs and State Model</h2>
+        <div class="diagram" aria-label="ID relationship diagram">
+          <div class="state-map">
+            <div class="node"><div class="label">Thread ID</div><div class="detail"><code>Thread.id</code>, <code>StoredThread.thread_id</code>, lookup key for loaded and durable state.</div></div>
+            <div class="node"><div class="label">Session ID</div><div class="detail">Shared by root thread and subagents in persisted create params.</div></div>
+            <div class="node"><div class="label">Turn ID</div><div class="detail">Core submission ID, UUIDv7, exposed as public turn ID.</div></div>
+            <div class="node"><div class="label">Item ID</div><div class="detail">Response/tool/message item identity; used by deltas and item completion.</div></div>
+          </div>
+        </div>
+
+        <table>
+          <thead><tr><th>ID / structure</th><th>Owner</th><th>How it links the flow</th><th>Source evidence</th></tr></thead>
+          <tbody>
+            <tr><td><code>Thread.id</code></td><td>App-server API and thread store</td><td>Names the conversation in JSON-RPC, loaded-thread maps, store reads, notifications, and turn requests.</td><td><code>app-server-protocol/src/protocol/v2/thread_data.rs:180-225</code>; <code>thread-store/src/types.rs:417-458</code></td></tr>
+            <tr><td><code>session_id</code></td><td>Core/thread-store</td><td>Identifies the live session tree root; create params say it is shared by the root thread and subagents.</td><td><code>thread-store/src/types.rs:67-72</code>; README fork note: <code>app-server/README.md:358</code></td></tr>
+            <tr><td><code>turn.id</code></td><td>Core session</td><td><code>turn/start</code> returns the submission ID as <code>Turn.id</code>; core notes these IDs are UUIDv7 and public-facing.</td><td><code>app-server/src/request_processors/turn_processor.rs:521-568</code>; <code>core/src/session/mod.rs:890-897</code></td></tr>
+            <tr><td><code>client_user_message_id</code></td><td>Client-provided</td><td>Optional correlation ID for the user message represented by <code>Op::UserInput</code>; echoed into user message items.</td><td><code>protocol/src/protocol.rs:161-166</code>; README: <code>app-server/README.md:1370</code></td></tr>
+            <tr><td><code>Event.id</code></td><td>Core</td><td>App-server treats it as the event turn ID when translating core events to v2 notifications.</td><td><code>app-server/src/bespoke_event_handling.rs:150-153</code></td></tr>
+            <tr><td><code>ThreadItem</code></td><td>App-server protocol projection</td><td>User-visible item shape created from core turn items and event translations.</td><td><code>app-server-protocol/src/protocol/v2/item.rs:221-396</code>, <code>823-980</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout definition">
+          <strong>Definition: turn versus sampling request</strong>
+          A turn is the user-visible lifecycle bounded by <code>turn/started</code> and <code>turn/completed</code>. A single turn can make multiple model sampling requests when the model asks for tool calls or when pending input/follow-up work remains. <span class="source">Evidence: <code>core/src/session/turn.rs:128-140</code>, <code>217-330</code>.</span>
+        </div>
+      </section>
+
+      <section id="persistence">
+        <h2>5. Persistence Inventory</h2>
+        <table>
+          <thead><tr><th>State</th><th>Durability class</th><th>Owner</th><th>Notes and evidence</th></tr></thead>
+          <tbody>
+            <tr><td>Rollout items</td><td>Durable</td><td><code>LiveThread</code> / <code>ThreadStore</code></td><td>Core persists event messages and response items as rollout items. <code>send_event_raw</code> appends <code>RolloutItem::EventMsg</code> before delivery; <code>record_conversation_items</code> records history, persists response items, then sends raw response item events. <span class="source"><code>core/src/session/mod.rs:1916-1923</code>, <code>2774-2791</code>.</span></td></tr>
+            <tr><td>Thread metadata</td><td>Durable projection</td><td><code>ThreadMetadataSync</code> plus store implementation</td><td><code>LiveThread::append_items</code> filters canonical items, observes append-derived metadata, and applies <code>update_thread_metadata</code>. <span class="source"><code>thread-store/src/live_thread.rs:146-187</code>.</span></td></tr>
+            <tr><td>Local JSONL rollout files</td><td>Durable</td><td><code>LocalThreadStore</code></td><td>Local store says JSONL files are the durable replay format and remain readable without SQLite. <span class="source"><code>thread-store/src/local/mod.rs:45-57</code>.</span></td></tr>
+            <tr><td>SQLite thread metadata</td><td>Durable index/cache-like projection</td><td><code>LocalThreadStore</code> with state DB</td><td>SQLite is used by local list/read paths for fast lookup, but JSONL remains canonical replay. <span class="source"><code>thread-store/src/local/mod.rs:50-57</code>.</span></td></tr>
+            <tr><td>Loaded thread/session</td><td>Ephemeral process memory</td><td><code>ThreadManager</code>, <code>CodexThread</code>, <code>Session</code></td><td><code>MessageProcessor</code> builds a process-scoped store and <code>ThreadManager</code>; loaded sessions are removed on idle unload. <span class="source"><code>app-server/src/message_processor.rs:333-337</code>, <code>348-387</code>; <code>app-server/src/request_processors/thread_lifecycle.rs:407-457</code>.</span></td></tr>
+            <tr><td>Thread subscriptions and current active-turn projection</td><td>Ephemeral process memory</td><td><code>ThreadStateManager</code> / <code>ThreadState</code></td><td>Stores subscribers, listener command channel, raw-event opt-in, current <code>ThreadHistoryBuilder</code>, pending interrupts, and terminal-turn tracking. <span class="source"><code>app-server/src/thread_state.rs:77-91</code>, <code>278-296</code>, <code>492-520</code>.</span></td></tr>
+            <tr><td>Model request stream state</td><td>Ephemeral</td><td><code>ModelClientSession</code> and <code>run_turn</code></td><td>Turn-scoped client session caches WebSocket/sticky routing state and is reused across retries within a turn. <span class="source"><code>core/src/session/turn.rs:217-219</code>.</span></td></tr>
+            <tr><td>Reconstructed API turns</td><td>Derived</td><td>App-server history builder / thread history APIs</td><td>History is reconstructed from rollout items for resume/read/list paths; active turn state is merged with stored history in listener helpers. <span class="source"><code>app-server/src/request_processors/thread_lifecycle.rs:746-755</code>; <code>app-server-protocol/src/protocol/thread_history.rs</code>.</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="async">
+        <h2>6. Async Handoff Inventory</h2>
+        <ul>
+          <li><strong>JSON-RPC serialization:</strong> method definitions attach serialization keys such as <code>thread_id(params.thread_id)</code> for turn methods, so requests for the same thread are serialized before processor execution. <span class="source">Evidence: <code>app-server-protocol/src/protocol/common.rs:799-814</code>.</span></li>
+          <li><strong>Thread start background task:</strong> <code>thread/start</code> is handled by <code>thread_start_task</code>, which loads config, creates core thread, attaches listener, sends response, then sends <code>thread/started</code>. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1050-1317</code>.</span></li>
+          <li><strong>Core submission queue:</strong> <code>Session::spawn_internal</code> creates a bounded submission channel with capacity 512 and an unbounded event channel, then spawns <code>submission_loop</code>. <span class="source">Evidence: <code>core/src/session/mod.rs:538-540</code>, <code>713-719</code>.</span></li>
+          <li><strong>Core event queue:</strong> app-server reads <code>conversation.next_event()</code> in a per-thread listener task and translates events to notifications. <span class="source">Evidence: <code>app-server/src/request_processors/thread_lifecycle.rs:277-353</code>.</span></li>
+          <li><strong>Per-thread listener command channel:</strong> <code>ThreadState::set_listener</code> creates an unbounded listener command channel; listener commands are handled in the same listener select loop as core events. <span class="source">Evidence: <code>app-server/src/thread_state.rs:101-117</code>; <code>app-server/src/request_processors/thread_lifecycle.rs:285-300</code>.</span></li>
+          <li><strong>Idle unload watcher:</strong> after no subscribers and no activity, the listener triggers unload; README documents a 30 minute delay and code shuts down, removes the thread, and emits <code>thread/closed</code>. <span class="source">Evidence: <code>app-server/README.md:455-478</code>; <code>app-server/src/request_processors/thread_lifecycle.rs:354-385</code>, <code>407-457</code>.</span></li>
+          <li><strong>Model stream:</strong> <code>try_run_sampling_request</code> awaits stream events; output item completions feed tool execution/history, deltas produce user-visible item deltas, and <code>ResponseEvent::Completed</code> finalizes token usage and sampling result. <span class="source">Evidence: <code>core/src/session/turn.rs:1887-2075</code>, <code>2100-2260</code>.</span></li>
+          <li><strong>Tool futures:</strong> completed response items can enqueue tool futures in a <code>FuturesOrdered</code> queue; tool output can require follow-up model sampling. <span class="source">Evidence: <code>core/src/session/turn.rs:1926-1928</code>, <code>2059-2073</code>.</span></li>
+          <li><strong>Retries and fallback:</strong> retryable stream errors sleep with backoff, notify users on later reconnects, and can switch from WebSocket to HTTPS after exhausting retry budget. <span class="source">Evidence: <code>core/src/responses_retry.rs:20-79</code>.</span></li>
+          <li><strong>Cancellation:</strong> stream waits and task runs are tied to cancellation tokens; task abort allows a grace period before aborting and emits <code>TurnAborted</code>. <span class="source">Evidence: <code>core/src/session/turn.rs:1960-1968</code>; <code>core/src/tasks/mod.rs:829-908</code>.</span></li>
+        </ul>
+      </section>
+
+      <section id="history">
+        <h2>7. Evolutionary History</h2>
+        <p>The implementation carries compatibility surfaces from older storage and API shapes. Local thread storage explicitly treats JSONL rollout files as the durable replay format even when SQLite exists, because old local rollout files and SQLite-less reads must remain supported. <span class="source">Evidence: <code>thread-store/src/local/mod.rs:45-57</code>.</span></p>
+        <p>Core protocol events retain v1 wire names for turn lifecycle events: <code>TurnStarted</code> serializes as <code>task_started</code> with alias <code>turn_started</code>, and <code>TurnComplete</code> serializes as <code>task_complete</code> with alias <code>turn_complete</code>. This is a compatibility branch that matters if changing event serialization or replay. <span class="source">Evidence: <code>protocol/src/protocol.rs:1308-1320</code>.</span></p>
+        <p>Deprecated and experimental fields coexist in v2 APIs. For example, <code>multiAgentMode</code> is deprecated and ignored in thread/turn parameters, while newer behavior is controlled by reasoning effort; raw response item notifications are internal/experimental and opt-in. <span class="source">Evidence: <code>app-server-protocol/src/protocol/v2/thread.rs:103-112</code>, <code>143-147</code>; <code>app-server-protocol/src/protocol/v2/turn.rs:154-157</code>; README: <code>app-server/README.md:140-143</code>, <code>171</code>.</span></p>
+        <div class="callout uncertain">
+          <strong>Inference, labeled</strong>
+          The code appears to be in an active migration from raw/core event history toward paginated, projected app-server thread history. Evidence includes <code>ThreadHistoryMode</code>, paginated <code>thread/turns/list</code> and <code>thread/items/list</code>, and stored item projections, but this document did not inspect PR discussions. <span class="source">Evidence: <code>thread-store/src/types.rs:332-386</code>; README: <code>app-server/README.md:498-529</code>.</span>
+        </div>
+      </section>
+
+      <section id="assumptions">
+        <h2>8. Explicit Assumptions</h2>
+        <ul>
+          <li><strong>Ordering:</strong> per-thread JSON-RPC requests are serialized, and core submissions are processed by a single <code>submission_loop</code>. Do not bypass either without rethinking ordering. <span class="source"><code>app-server-protocol/src/protocol/common.rs:799-814</code>; <code>core/src/session/handlers.rs:702-765</code>.</span></li>
+          <li><strong>One active regular task:</strong> <code>spawn_task</code> aborts existing tasks with <code>TurnAbortReason::Replaced</code> before starting a new one. <span class="source"><code>core/src/tasks/mod.rs:313-323</code>.</span></li>
+          <li><strong>Turn identity stability:</strong> callers may rely on UUIDv7 timestamp properties of turn IDs. <span class="source"><code>core/src/session/mod.rs:890-897</code>.</span></li>
+          <li><strong>Persistence-before-delivery:</strong> core appends event/response rollout items before delivering or completing lifecycle notifications, and terminal events get explicit flush barriers. <span class="source"><code>core/src/session/mod.rs:1916-1923</code>, <code>2774-2791</code>; <code>core/src/tasks/mod.rs:799-803</code>.</span></li>
+          <li><strong>Listener state synchronization:</strong> app-server tracks an event in <code>ThreadState</code> before emitting typed translations, so active-turn snapshots and raw-event opt-in remain in sync. <span class="source"><code>app-server/src/request_processors/thread_lifecycle.rs:311-341</code>; <code>app-server/src/thread_state.rs:144-154</code>.</span></li>
+          <li><strong>Trust boundary:</strong> app-server maps v2 request fields into core configuration and permission settings; clients do not directly mutate core state. <span class="source"><code>app-server/src/request_processors/turn_processor.rs:484-519</code>.</span></li>
+          <li><strong>Retry semantics:</strong> stream retries can replay the same prompt built from history; non-retryable errors terminate the sampling request. <span class="source"><code>core/src/session/turn.rs:1099-1165</code>; <code>core/src/responses_retry.rs:48-79</code>.</span></li>
+          <li><strong>Restart recovery:</strong> loaded <code>ThreadState</code> is ephemeral, but persisted rollout history and metadata can reconstruct API thread/turn state on resume/read. <span class="source"><code>thread-store/src/store.rs:64-92</code>; <code>app-server/src/thread_state.rs:77-91</code>.</span></li>
+          <li><strong>Version skew:</strong> v1 event names and v2 notification projections coexist, so changing event names or item projection shapes can break older replay/client paths. <span class="source"><code>protocol/src/protocol.rs:1308-1320</code>; <code>app-server-protocol/src/protocol/common.rs:1607-1635</code>.</span></li>
+        </ul>
+      </section>
+
+      <section id="sequence">
+        <h2>9. End-to-End Sequence</h2>
+        <p>This concrete example follows the TUI starting a thread, sending “Explain this diff,” and receiving the final assistant message.</p>
+
+        <h3>Step 1: Client creates a thread</h3>
+        <p>The TUI calls <code>ClientRequest::ThreadStart</code> using params derived from config. The request includes model/provider, cwd, workspace roots, approval/sandbox or permissions settings, ephemeral setting, and <code>thread_source: User</code>. <span class="source">Evidence: <code>tui/src/app_server_session.rs:461-480</code>, <code>1402-1432</code>.</span></p>
+        <pre><code>{
+  "method": "thread/start",
+  "params": {
+    "cwd": "/workspaces/codex",
+    "model": "gpt-5.1-codex",
+    "threadSource": "user"
+  }
+}</code></pre>
+        <p>Failure surfaces here include config load errors, invalid dynamic tools, trust persistence failures that are tolerated with in-memory trust, or thread creation errors. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1072-1150</code>, <code>1195-1200</code>.</span></p>
+
+        <h3>Step 2: App-server creates core thread and attaches listener</h3>
+        <p><code>thread_start_task</code> calls <code>ThreadManager::start_thread_with_options</code>, gets a <code>thread_id</code>, core thread, and <code>session_configured</code>, then builds the API <code>Thread</code> from a config snapshot. Before notifying the client, it auto-attaches the per-thread listener for the requesting connection. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1163-1247</code>.</span></p>
+        <p>The app-server sends the JSON-RPC response first and then sends <code>thread/started</code>. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1279-1311</code>.</span></p>
+
+        <h3>Step 3: Client submits user input</h3>
+        <p>The TUI calls <code>turn/start</code> with <code>thread_id</code>, input items, and current turn overrides. The processor loads the thread, validates direct input and input size, maps v2 input into core input items, resolves environment/cwd/settings overrides, builds <code>Op::UserInput</code>, and submits it to core. <span class="source">Evidence: <code>tui/src/app_server_session.rs:772-820</code>; <code>app-server/src/request_processors/turn_processor.rs:442-535</code>.</span></p>
+        <pre><code>{
+  "method": "turn/start",
+  "params": {
+    "threadId": "thr_123",
+    "input": [{ "type": "text", "text": "Explain this diff" }]
+  }
+}</code></pre>
+        <p>The response returns immediately with an in-progress <code>Turn</code> and empty items. The real running lifecycle begins later when core emits <code>TurnStarted</code>. <span class="source">Evidence: <code>app-server/src/request_processors/turn_processor.rs:554-568</code>; <code>app-server/README.md:171</code>.</span></p>
+
+        <h3>Step 4: Core serializes and starts the turn</h3>
+        <p><code>submit_user_input_with_client_user_message_id</code> generates a UUIDv7 submission ID and sends a <code>Submission</code> into the bounded channel. The submission loop receives <code>Op::UserInput</code> and calls <code>user_input_or_turn</code>. <span class="source">Evidence: <code>core/src/session/mod.rs:752-768</code>, <code>890-897</code>; <code>core/src/session/handlers.rs:702-759</code>.</span></p>
+        <p><code>user_input_or_turn_inner</code> applies settings, creates a new turn context, steers input if there is an active turn, or spawns a <code>RegularTask</code> when idle. <span class="source">Evidence: <code>core/src/session/handlers.rs:183-275</code>.</span></p>
+
+        <h3>Step 5: Core emits <code>TurnStarted</code></h3>
+        <p><code>RegularTask</code> emits <code>EventMsg::TurnStarted</code> inline before the first model call. App-server’s listener receives the event, updates <code>ThreadState</code>, and <code>apply_bespoke_event_handling</code> sends a <code>turn/started</code> notification with a fresh in-progress <code>Turn</code>. <span class="source">Evidence: <code>core/src/tasks/regular.rs:47-58</code>; <code>app-server/src/request_processors/thread_lifecycle.rs:302-341</code>; <code>app-server/src/bespoke_event_handling.rs:155-183</code>.</span></p>
+
+        <h3>Step 6: Core builds prompt and streams model output</h3>
+        <p><code>run_turn</code> records context updates and input, builds skills/plugins/tool routing, clones history into prompt input, builds a Responses request, and calls <code>ModelClientSession::stream</code>. The request is explicitly streaming and contains model, instructions, input, tools, reasoning, service tier, prompt cache key, output schema/text config, and client metadata. <span class="source">Evidence: <code>core/src/session/turn.rs:142-207</code>, <code>270-294</code>, <code>1043-1117</code>; <code>core/src/client.rs:812-890</code>.</span></p>
+        <p>When WebSocket streaming is enabled, the client tries WebSocket first; otherwise or after fallback it uses HTTP streaming. <span class="source">Evidence: <code>core/src/client.rs:1728-1777</code>.</span></p>
+
+        <h3>Step 7: Stream events become rollout items and notifications</h3>
+        <p>As <code>try_run_sampling_request</code> receives <code>ResponseEvent</code>s, output item completions are handled, tool calls may enqueue futures, assistant message item starts are emitted, and text deltas become <code>AgentMessageContentDelta</code> events. <span class="source">Evidence: <code>core/src/session/turn.rs:1887-2075</code>, <code>2100-2260</code>.</span></p>
+        <p>Core persists event messages before delivery and persists response items before raw item emission. App-server translates core item events into v2 notifications such as <code>item/started</code>, <code>item/agentMessage/delta</code>, and <code>item/completed</code>. <span class="source">Evidence: <code>core/src/session/mod.rs:1916-1923</code>, <code>2774-2791</code>; <code>app-server/src/bespoke_event_handling.rs:869-889</code>, <code>1348-1411</code>.</span></p>
+
+        <h3>Step 8: The turn completes</h3>
+        <p>When the stream sends <code>ResponseEvent::Completed</code>, core records token usage and decides whether another sampling request is needed. If no follow-up is needed, the task finishes; <code>on_task_finished</code> emits <code>TurnComplete</code>, clears the active turn when appropriate, and flushes the terminal event. <span class="source">Evidence: <code>core/src/session/turn.rs:2212-2238</code>; <code>core/src/tasks/mod.rs:743-804</code>.</span></p>
+        <p>App-server receives <code>TurnComplete</code>, aborts pending per-thread server requests, resolves interrupts, updates watch status, and emits <code>turn/completed</code> with final status/error/timing metadata. <span class="source">Evidence: <code>app-server/src/bespoke_event_handling.rs:185-200</code>, <code>1348-1369</code>.</span></p>
+      </section>
+
+      <section id="walkthrough">
+        <h2>10. Code Walkthrough</h2>
+        <h3>API contracts</h3>
+        <p><code>app-server-protocol/src/protocol/common.rs</code> owns method and notification names. <code>v2/thread.rs</code>, <code>v2/turn.rs</code>, and <code>v2/thread_data.rs</code> own request/response/notification payloads. These files matter because API-level changes must preserve wire naming, experimental gates, and optional-field semantics. <span class="source">Evidence: <code>common.rs:476-492</code>, <code>799-814</code>, <code>1607-1635</code>; <code>v2/thread.rs:56-201</code>; <code>v2/turn.rs:68-165</code>.</span></p>
+
+        <h3>App-server composition</h3>
+        <p><code>MessageProcessor</code> owns the process-scoped <code>ThreadStore</code>, creates <code>ThreadManager</code>, and wires <code>ThreadRequestProcessor</code> and <code>TurnRequestProcessor</code>. This is the app-server dependency root for the flow. <span class="source">Evidence: <code>app-server/src/message_processor.rs:333-389</code>, <code>482-512</code>.</span></p>
+
+        <h3>Thread lifecycle</h3>
+        <p><code>thread_processor.rs</code> owns start/resume/fork request handling. For start, <code>thread_start_task</code> loads config, starts core thread, attaches listener, updates watch state, sends response, then notifies <code>thread/started</code>. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1050-1317</code>.</span></p>
+
+        <h3>Turn submission</h3>
+        <p><code>turn_processor.rs</code> maps <code>TurnStartParams</code> to <code>Op::UserInput</code>, submits through <code>CodexThread::submit_user_input_with_client_user_message_id</code>, records request-to-turn correlation, and returns an initial in-progress turn. <span class="source">Evidence: <code>app-server/src/request_processors/turn_processor.rs:442-568</code>.</span></p>
+
+        <h3>Listener and event translation</h3>
+        <p><code>thread_lifecycle.rs</code> starts the per-thread listener and owns the select loop over cancellation, listener commands, core events, and idle unload triggers. <code>bespoke_event_handling.rs</code> maps core <code>EventMsg</code> variants to v2 notifications and server-initiated requests. <span class="source">Evidence: <code>app-server/src/request_processors/thread_lifecycle.rs:138-187</code>, <code>277-353</code>; <code>app-server/src/bespoke_event_handling.rs:139-200</code>, <code>869-889</code>.</span></p>
+
+        <h3>Core session queue and task lifecycle</h3>
+        <p><code>core/src/session/mod.rs</code> creates the submission and event channels. <code>handlers.rs</code> serializes ops. <code>tasks/mod.rs</code> enforces the running task lifecycle and terminal flushes. <span class="source">Evidence: <code>core/src/session/mod.rs:538-540</code>, <code>713-719</code>; <code>core/src/session/handlers.rs:702-765</code>; <code>core/src/tasks/mod.rs:313-451</code>, <code>743-804</code>.</span></p>
+
+        <h3>Model/tool loop</h3>
+        <p><code>core/src/session/turn.rs</code> owns the agent loop: record inputs, build prompt, build tools, stream model output, run tools, continue sampling if needed, and return the last assistant message. <span class="source">Evidence: <code>core/src/session/turn.rs:128-140</code>, <code>217-330</code>, <code>1043-1165</code>, <code>1887-2260</code>.</span></p>
+
+        <h3>Streaming transport</h3>
+        <p><code>core/src/client.rs</code> owns Responses request construction, WebSocket/HTTP streaming, stream mapping, telemetry, and failure recording. <code>responses_retry.rs</code> owns retry/fallback policy. <span class="source">Evidence: <code>core/src/client.rs:812-890</code>, <code>1351-1424</code>, <code>1465-1628</code>, <code>1867-2036</code>; <code>core/src/responses_retry.rs:20-79</code>.</span></p>
+
+        <h3>Persistence</h3>
+        <p><code>thread-store/src/store.rs</code> defines the storage boundary. <code>live_thread.rs</code> owns active persistence lifecycle and append-derived metadata updates. <code>local/mod.rs</code> defines the local JSONL/SQLite compatibility contract. <span class="source">Evidence: <code>thread-store/src/store.rs:29-138</code>; <code>thread-store/src/live_thread.rs:27-31</code>, <code>89-187</code>; <code>thread-store/src/local/mod.rs:45-57</code>.</span></p>
+      </section>
+
+      <section id="change-guide">
+        <h2>11. Change Guide</h2>
+        <ul>
+          <li>Start at the API contract if the change affects clients: <code>app-server-protocol/src/protocol/common.rs</code>, <code>v2/thread.rs</code>, <code>v2/turn.rs</code>, and <code>v2/thread_data.rs</code>. Preserve camelCase wire names and experimental gating conventions.</li>
+          <li>For request behavior, change processors first and core second: <code>thread_processor.rs</code> for create/resume/fork, <code>turn_processor.rs</code> for user input and overrides, then <code>core/src/session/handlers.rs</code> for submission semantics.</li>
+          <li>For response generation, inspect <code>core/src/session/turn.rs</code>, <code>core/src/stream_events_utils.rs</code>, and <code>core/src/client.rs</code>. Do not assume one user-visible turn equals one model request.</li>
+          <li>For notification behavior, preserve the listener rule: track event state before emitting v2 translations. Changing notification order can break clients that merge active-turn snapshots with streamed items.</li>
+          <li>For persistence, prefer <code>LiveThread</code> and <code>ThreadStore</code> boundaries. Avoid direct store writes for live sessions unless you also maintain metadata sync and flush barriers.</li>
+          <li>Run protocol tests after API shape changes: <code>just test -p codex-app-server-protocol</code>. Run app-server tests for processor/listener changes. Run core tests for session/model loop changes. If changing common/core/protocol behavior broadly, ask before running the complete <code>just test</code> suite per repo instructions.</li>
+          <li>Useful traces include <code>app_server.thread_start.*</code>, <code>session_loop</code>, <code>turn</code>, <code>stream_request</code>, <code>receiving_stream</code>, and <code>model_client.stream_responses_*</code>. <span class="source">Evidence: <code>app-server/src/request_processors/thread_processor.rs:1190-1310</code>; <code>core/src/session/mod.rs:713-719</code>; <code>core/src/tasks/mod.rs:384-433</code>; <code>core/src/session/turn.rs:1912-1924</code>; <code>core/src/client.rs:1339-1351</code>, <code>1465-1477</code>.</span></li>
+        </ul>
+      </section>
+
+      <section id="tests-observability">
+        <h2>12. Tests and Observability</h2>
+        <table>
+          <thead><tr><th>Area</th><th>Existing evidence to inspect</th><th>What it proves / gap</th></tr></thead>
+          <tbody>
+            <tr><td>App-server tracing</td><td><code>codex-rs/app-server/src/message_processor_tracing_tests.rs</code></td><td>Validates trace wiring for app-server requests such as thread/turn start. It does not prove full model execution.</td></tr>
+            <tr><td>Thread request behavior</td><td><code>codex-rs/app-server/src/request_processors/thread_processor_tests.rs</code>, <code>thread_summary_tests.rs</code></td><td>Useful for resume/start/fork response behavior and history summaries.</td></tr>
+            <tr><td>History projection</td><td><code>codex-rs/app-server-protocol/src/protocol/thread_history.rs</code></td><td>Tests reveal how rollout events/items become API <code>Turn</code> and <code>ThreadItem</code> projections. Important for replay compatibility.</td></tr>
+            <tr><td>Core session lifecycle</td><td><code>codex-rs/core/src/session/tests.rs</code></td><td>Covers session initialization, turn completion, submission, interrupts, and persistence-related behavior. Prefer integration-style tests for agent logic changes.</td></tr>
+            <tr><td>TUI consumption</td><td><code>codex-rs/tui/src/chatwidget/tests/app_server.rs</code>, <code>history_replay.rs</code>, <code>composer_submission.rs</code></td><td>Validates client assumptions around notification ordering and rendering state. Use when changing notification shape/order.</td></tr>
+            <tr><td>Streaming telemetry</td><td><code>core/src/client.rs</code>, <code>core/src/session/turn.rs</code>, <code>core/src/tasks/mod.rs</code></td><td>Traces and metrics exist for model stream transport, stream receive, turn timing, token usage, and task duration. <span class="source">Evidence: <code>core/src/client.rs:1351-1361</code>, <code>1465-1477</code>; <code>core/src/session/turn.rs:1944-1984</code>; <code>core/src/tasks/mod.rs:435-449</code>.</span></td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <strong>Test gap to keep in mind</strong>
+          A change that crosses app-server notification ordering, core stream retries, and durable rollout replay likely needs tests in more than one crate. A single processor unit test will not catch replay or TUI merge regressions.
+        </div>
+      </section>
+
+      <section id="risks">
+        <h2>13. Risks and Edge Cases</h2>
+        <ul>
+          <li><strong>Partial failure during thread start:</strong> live persistence can be opened before session initialization fully succeeds; <code>LiveThreadInitGuard</code> discards the live writer on early return rather than materializing lazy state. <span class="source"><code>thread-store/src/live_thread.rs:40-87</code>.</span></li>
+          <li><strong>Duplicate or concurrent turn requests:</strong> per-thread request serialization and core submission ordering reduce races, but <code>turn/start</code> while a turn is active can become steer input or fail depending on active turn steerability. <span class="source"><code>core/src/session/handlers.rs:220-275</code>; README error section: <code>app-server/README.md:1434</code>.</span></li>
+          <li><strong>Out-of-order client observations:</strong> <code>turn/start</code> response returns before <code>turn/started</code>; clients must treat response as accepted/in-progress, not as evidence that the task has begun. <span class="source"><code>app-server/src/request_processors/turn_processor.rs:554-568</code>; <code>app-server/README.md:171</code>.</span></li>
+          <li><strong>Stream disconnects:</strong> retryable stream errors back off and may emit “Reconnecting...” warnings; exhausting WebSocket retry budget can switch transport to HTTPS. <span class="source"><code>core/src/responses_retry.rs:31-75</code>.</span></li>
+          <li><strong>Consumer drops stream:</strong> mapped response stream records cancellation if the consumer is dropped before provider terminal event. <span class="source"><code>core/src/client.rs:1905-1929</code>.</span></li>
+          <li><strong>Terminal event durability:</strong> terminal turn events need explicit flush after emission because regular items may have been flushed before the terminal event was appended. <span class="source"><code>core/src/tasks/mod.rs:799-803</code>, <code>903-907</code>.</span></li>
+          <li><strong>Raw response event leakage:</strong> raw response item notifications are internal and gated by <code>experimental_raw_events</code>; listener filters them unless enabled, while still emitting hook prompt items where needed. <span class="source"><code>app-server-protocol/src/protocol/v2/thread.rs:143-147</code>; <code>app-server/src/request_processors/thread_lifecycle.rs:328-339</code>.</span></li>
+          <li><strong>Loaded-thread unload:</strong> once the last subscriber leaves, unload is delayed and only happens when idle; attempts to attach while a thread is closing are rejected. <span class="source"><code>app-server/src/request_processors/thread_lifecycle.rs:156-162</code>, <code>354-385</code>.</span></li>
+          <li><strong>Metadata drift:</strong> raw store appends are not enough to update metadata; live appends must flow through <code>LiveThread</code> or explicit <code>update_thread_metadata</code>. <span class="source"><code>thread-store/src/local/mod.rs:53-57</code>; <code>thread-store/src/live_thread.rs:169-185</code>.</span></li>
+          <li><strong>Version skew:</strong> clients may consume v1 event names in rollout history while live clients consume v2 notifications; avoid renaming without migration/compatibility. <span class="source"><code>protocol/src/protocol.rs:1308-1320</code>.</span></li>
+        </ul>
+      </section>
+
+      <section id="uncertainties">
+        <h2>14. Uncertainties</h2>
+        <ul>
+          <li><strong>Exact SQLite schema/table names:</strong> This document verifies that local storage uses SQLite metadata as a queryable index, but it does not cite the migration/schema definitions. I checked <code>thread-store/src/local/mod.rs</code>, <code>read_thread.rs</code>, and store types. Schema-level certainty would require following <code>codex_state</code> migrations and state DB definitions.</li>
+          <li><strong>Remote thread store behavior:</strong> The <code>ThreadStore</code> trait allows remote stores, and <code>LiveThread</code> abstracts over them, but this document focused on the local implementation because that was the concrete implementation found in the checked code. Remote service semantics, if deployed elsewhere, need separate verification.</li>
+          <li><strong>External client variants:</strong> The TUI caller is cited, and the app-server README documents generic clients. Other product clients may have additional ordering or notification assumptions not visible in this repository.</li>
+          <li><strong>Historical intent:</strong> Compatibility and migration inferences are based on code comments, deprecated fields, aliases, and side-by-side APIs. I did not inspect PRs or issues, so intent beyond code evidence is intentionally labeled as inference.</li>
+        </ul>
+      </section>
+
+      <section id="self-audit">
+        <h2>15. Final Self-Audit</h2>
+        <ul class="checklist">
+          <li>Can someone find the entry point? Yes: <code>thread/start</code> and <code>turn/start</code> are mapped to protocol and processor files.</li>
+          <li>Can someone identify the durable state? Yes: rollout items and metadata are described with <code>ThreadStore</code>, <code>LiveThread</code>, and local JSONL/SQLite evidence.</li>
+          <li>Can someone identify async handoffs? Yes: JSON-RPC serialization, background thread start, core submission/event queues, listener task, stream, retries, and unload are listed.</li>
+          <li>Can someone see who calls this feature and what it calls? Yes: TUI and generic app-server clients are inbound; model Responses API, tools, store, and notifications are outbound.</li>
+          <li>Can someone understand the main sequence without reading every file? Yes: the end-to-end sequence follows one realistic user message from request to terminal notification.</li>
+          <li>Can someone identify the highest-risk invariants? Yes: turn ID, ordering, one active task, persistence-before-delivery, listener state tracking, and terminal flushes are called out.</li>
+          <li>Are important claims tied to source evidence? Yes: each major section cites local paths and line ranges.</li>
+          <li>Are uncertainties labeled instead of guessed? Yes: schema details, remote store behavior, external client assumptions, and history intent are labeled.</li>
+          <li>Is unrelated polish avoided? Yes: realtime/review/plugin internals are only mentioned where they touch the conversation flow.</li>
+          <li>Would this help an engineer make a sweeping change safely? Yes: it maps ownership boundaries, state, async handoffs, code locations, tests, and known edge cases.</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const links = Array.from(document.querySelectorAll('#toc a'));
+      const sections = links
+        .map((link) => document.querySelector(link.getAttribute('href')))
+        .filter(Boolean);
+
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (!visible) return;
+        links.forEach((link) => {
+          const isActive = link.getAttribute('href') === '#' + visible.target.id;
+          link.style.fontWeight = isActive ? '700' : '400';
+        });
+      }, { rootMargin: '0px 0px -70% 0px', threshold: 0.01 });
+
+      sections.forEach((section) => observer.observe(section));
+    })();
+  </script>
+</body>
+</html>
