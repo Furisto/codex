@@ -432,6 +432,7 @@ fn stored_config_snapshot() -> StoredThreadConfigSnapshot {
         reasoning_effort: Some(ReasoningEffort::High),
         reasoning_summary: None,
         personality: None,
+        developer_instructions: Some("snapshot developer instructions".to_string()),
         collaboration_mode: CollaborationMode {
             mode: ModeKind::Default,
             settings: Settings {

@@ -426,6 +426,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) parent_thread_id: Option<ThreadId>,
     pub(crate) thread_source: Option<ThreadSource>,
     pub(crate) originator: String,
+    pub(crate) collaboration_mode_override: Option<CollaborationMode>,
     pub(crate) agent_control: AgentControl,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) metrics_service_name: Option<String>,
@@ -518,6 +519,7 @@ impl Codex {
             parent_thread_id,
             thread_source,
             originator,
+            collaboration_mode_override,
             agent_control,
             dynamic_tools,
             metrics_service_name,
@@ -623,14 +625,14 @@ impl Codex {
         };
         // TODO (aibrahim): Consolidate config.model and config.model_reasoning_effort into config.collaboration_mode
         // to avoid extracting these fields separately and constructing CollaborationMode here.
-        let collaboration_mode = CollaborationMode {
+        let collaboration_mode = collaboration_mode_override.unwrap_or_else(|| CollaborationMode {
             mode: ModeKind::Default,
             settings: Settings {
                 model: model.clone(),
                 reasoning_effort: config.model_reasoning_effort.clone(),
                 developer_instructions: None,
             },
-        };
+        });
         let service_tier = get_service_tier(
             config.service_tier.clone(),
             config.features.enabled(Feature::FastMode),

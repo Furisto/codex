@@ -42,6 +42,7 @@ use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -71,6 +72,7 @@ use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::ReadThreadByRolloutPathParams;
 use codex_thread_store::ReadThreadParams;
 use codex_thread_store::StoredThread;
+use codex_thread_store::StoredThreadConfigSnapshot;
 use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
@@ -725,6 +727,7 @@ impl ThreadManager {
             thread_source,
             options.dynamic_tools,
             options.metrics_service_name,
+            /*originator_override*/ None,
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             options.parent_trace,
@@ -732,6 +735,7 @@ impl ThreadManager {
             options.thread_extension_init,
             options.supports_openai_form_elicitation,
             /*user_shell_override*/ None,
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -822,6 +826,7 @@ impl ThreadManager {
             thread_source,
             Vec::new(),
             /*metrics_service_name*/ None,
+            /*originator_override*/ None,
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             parent_trace,
@@ -829,6 +834,48 @@ impl ThreadManager {
             /*thread_extension_init*/ ExtensionDataInit::default(),
             supports_openai_form_elicitation,
             /*user_shell_override*/ None,
+            /*collaboration_mode_override*/ None,
+        ))
+        .await
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub async fn resume_thread_with_history_from_snapshot(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        parent_trace: Option<W3cTraceContext>,
+        supports_openai_form_elicitation: bool,
+        config_snapshot: StoredThreadConfigSnapshot,
+    ) -> CodexResult<NewThread> {
+        let agent_control = self.agent_control_for_config(&config);
+        let environments = default_thread_environment_selections(
+            self.state.environment_manager.as_ref(),
+            &config.cwd,
+        );
+        Box::pin(self.state.spawn_thread_with_source(
+            config,
+            initial_history,
+            Some(config_snapshot.history_mode),
+            /*allow_provider_model_fallback*/ false,
+            auth_manager,
+            agent_control,
+            config_snapshot.session_source,
+            config_snapshot.parent_thread_id,
+            config_snapshot.forked_from_thread_id,
+            config_snapshot.thread_source,
+            Vec::new(),
+            /*metrics_service_name*/ None,
+            Some(config_snapshot.originator),
+            /*inherited_environments*/ None,
+            /*inherited_exec_policy*/ None,
+            parent_trace,
+            environments,
+            /*thread_extension_init*/ ExtensionDataInit::default(),
+            supports_openai_form_elicitation,
+            /*user_shell_override*/ None,
+            Some(config_snapshot.collaboration_mode),
         ))
         .await
     }
@@ -893,6 +940,7 @@ impl ThreadManager {
             thread_source,
             Vec::new(),
             /*metrics_service_name*/ None,
+            /*originator_override*/ None,
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             /*parent_trace*/ None,
@@ -900,6 +948,7 @@ impl ThreadManager {
             /*thread_extension_init*/ ExtensionDataInit::default(),
             supports_openai_form_elicitation,
             /*user_shell_override*/ Some(user_shell_override),
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -1395,6 +1444,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             metrics_service_name,
+            /*originator_override*/ None,
             inherited_environments,
             inherited_exec_policy,
             /*parent_trace*/ None,
@@ -1402,6 +1452,7 @@ impl ThreadManagerState {
             /*thread_extension_init*/ ExtensionDataInit::default(),
             /*supports_openai_form_elicitation*/ false,
             /*user_shell_override*/ None,
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -1435,6 +1486,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             /*metrics_service_name*/ None,
+            /*originator_override*/ None,
             inherited_environments,
             inherited_exec_policy,
             /*parent_trace*/ None,
@@ -1442,6 +1494,7 @@ impl ThreadManagerState {
             /*thread_extension_init*/ ExtensionDataInit::default(),
             /*supports_openai_form_elicitation*/ false,
             /*user_shell_override*/ None,
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -1477,6 +1530,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             /*metrics_service_name*/ None,
+            /*originator_override*/ None,
             inherited_environments,
             inherited_exec_policy,
             /*parent_trace*/ None,
@@ -1484,6 +1538,7 @@ impl ThreadManagerState {
             thread_extension_init,
             /*supports_openai_form_elicitation*/ false,
             /*user_shell_override*/ None,
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -1520,6 +1575,7 @@ impl ThreadManagerState {
             thread_source,
             dynamic_tools,
             metrics_service_name,
+            /*originator_override*/ None,
             /*inherited_environments*/ None,
             /*inherited_exec_policy*/ None,
             parent_trace,
@@ -1527,6 +1583,7 @@ impl ThreadManagerState {
             thread_extension_init,
             supports_openai_form_elicitation,
             user_shell_override,
+            /*collaboration_mode_override*/ None,
         ))
         .await
     }
@@ -1546,6 +1603,7 @@ impl ThreadManagerState {
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         metrics_service_name: Option<String>,
+        originator_override: Option<String>,
         inherited_environments: Option<TurnEnvironmentSnapshot>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         parent_trace: Option<W3cTraceContext>,
@@ -1553,6 +1611,7 @@ impl ThreadManagerState {
         thread_extension_init: ExtensionDataInit,
         supports_openai_form_elicitation: bool,
         user_shell_override: Option<crate::shell::Shell>,
+        collaboration_mode_override: Option<CollaborationMode>,
     ) -> CodexResult<NewThread> {
         let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if let InitialHistory::Resumed(resumed) = &initial_history {
@@ -1591,15 +1650,18 @@ impl ThreadManagerState {
                 forked_from_thread_id,
             )
             .await;
-        let originator = self
-            .effective_originator(
-                &initial_history,
-                metrics_service_name.as_deref(),
-                &session_source,
-                parent_thread_id,
-                forked_from_thread_id,
-            )
-            .await;
+        let originator = originator_override
+            .filter(|originator| !originator.is_empty())
+            .unwrap_or(
+                self.effective_originator(
+                    &initial_history,
+                    metrics_service_name.as_deref(),
+                    &session_source,
+                    parent_thread_id,
+                    forked_from_thread_id,
+                )
+                .await,
+            );
         let CodexSpawnOk {
             codex, thread_id, ..
         } = Box::pin(Codex::spawn(CodexSpawnArgs {
@@ -1622,6 +1684,7 @@ impl ThreadManagerState {
             parent_thread_id,
             thread_source,
             originator,
+            collaboration_mode_override,
             agent_control,
             dynamic_tools,
             metrics_service_name,

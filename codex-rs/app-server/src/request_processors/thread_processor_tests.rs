@@ -118,12 +118,14 @@ mod thread_processor_behavior_tests {
     use codex_config::SessionThreadConfig;
     use codex_config::StaticThreadConfigLoader;
     use codex_config::ThreadConfigSource;
+    use codex_core::config::ConfigBuilder;
     use codex_model_provider_info::ModelProviderInfo;
     use codex_model_provider_info::WireApi;
     use codex_protocol::ThreadId;
     use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::ModeKind;
     use codex_protocol::config_types::Settings;
+    use codex_protocol::models::ActivePermissionProfile;
     use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
     use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
     use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
@@ -772,6 +774,7 @@ mod thread_processor_behavior_tests {
             reasoning_effort: None,
             reasoning_summary: None,
             personality: None,
+            developer_instructions: None,
             collaboration_mode: CollaborationMode {
                 mode: ModeKind::Default,
                 settings: Settings {
@@ -835,6 +838,7 @@ mod thread_processor_behavior_tests {
             reasoning_effort: Some(ReasoningEffort::High),
             reasoning_summary: None,
             personality: None,
+            developer_instructions: Some("snapshot developer instructions".to_string()),
             collaboration_mode: CollaborationMode {
                 mode: ModeKind::Default,
                 settings: Settings {
@@ -1075,6 +1079,10 @@ mod thread_processor_behavior_tests {
             Some(PermissionProfile::read_only())
         );
         assert_eq!(
+            typesafe_overrides.developer_instructions,
+            Some("snapshot developer instructions".to_string())
+        );
+        assert_eq!(
             request_overrides,
             Some(HashMap::from([(
                 "model_reasoning_effort".to_string(),
@@ -1097,6 +1105,7 @@ mod thread_processor_behavior_tests {
             model_provider: Some("request-provider".to_string()),
             cwd: Some(PathBuf::from("/tmp/request-cwd")),
             sandbox_mode: Some(codex_protocol::protocol::SandboxMode::ReadOnly),
+            developer_instructions: Some("request developer instructions".to_string()),
             ..Default::default()
         };
 
@@ -1117,11 +1126,90 @@ mod thread_processor_behavior_tests {
         );
         assert_eq!(typesafe_overrides.permission_profile, None);
         assert_eq!(
+            typesafe_overrides.developer_instructions,
+            Some("request developer instructions".to_string())
+        );
+        assert_eq!(
             request_overrides,
             Some(HashMap::from([(
                 "model_reasoning_effort".to_string(),
                 serde_json::Value::String("low".to_string()),
             )]))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thread_store_config_snapshot_for_resume_spawn_updates_collaboration_mode_from_config()
+    -> Result<()> {
+        let codex_home = TempDir::new()?;
+        let cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(codex_home.path())
+            .expect("tempdir should be absolute");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .fallback_cwd(Some(codex_home.path().to_path_buf()))
+            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+            .build()
+            .await?;
+        config.model = Some("request-model".to_string());
+        config.model_reasoning_effort = Some(ReasoningEffort::Low);
+        let mut snapshot = test_stored_config_snapshot(cwd, Vec::new());
+        snapshot.collaboration_mode.mode = ModeKind::Plan;
+        snapshot.collaboration_mode.settings.developer_instructions =
+            Some("collaboration instructions".to_string());
+
+        let snapshot = thread_store_config_snapshot_for_resume_spawn(snapshot, &config);
+
+        assert_eq!(snapshot.collaboration_mode.mode, ModeKind::Plan);
+        assert_eq!(snapshot.collaboration_mode.model(), "request-model");
+        assert_eq!(
+            snapshot.collaboration_mode.reasoning_effort(),
+            Some(ReasoningEffort::Low)
+        );
+        assert_eq!(
+            snapshot
+                .collaboration_mode
+                .settings
+                .developer_instructions
+                .as_deref(),
+            Some("collaboration instructions")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn thread_store_config_snapshot_restores_active_permission_profile_to_loaded_config()
+    -> Result<()> {
+        let codex_home = TempDir::new()?;
+        let cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(codex_home.path())
+            .expect("tempdir should be absolute");
+        let profile_root = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
+            codex_home.path().join("profile-root"),
+        )
+        .expect("profile root should be absolute");
+        let mut config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .fallback_cwd(Some(codex_home.path().to_path_buf()))
+            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+            .build()
+            .await?;
+        let mut snapshot = test_stored_config_snapshot(cwd, Vec::new());
+        snapshot.active_permission_profile = Some(ActivePermissionProfile::new("snapshot-profile"));
+        snapshot.profile_workspace_roots = vec![profile_root.to_path_buf()];
+
+        apply_thread_store_config_snapshot_to_loaded_config(
+            &mut config,
+            &snapshot,
+            /*preserve_request_permission_override*/ false,
+        )?;
+
+        assert_eq!(
+            config.permissions.active_permission_profile(),
+            Some(ActivePermissionProfile::new("snapshot-profile"))
+        );
+        assert_eq!(
+            config.permissions.profile_workspace_roots(),
+            &[profile_root]
         );
         Ok(())
     }

@@ -33,6 +33,7 @@ use codex_app_server_protocol::ThreadDeleteResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
+use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -259,9 +260,7 @@ async fn cold_thread_resume_reuses_non_local_history_probe() -> Result<()> {
 
     let client = start_in_process_client(config, loader_overrides).await?;
     let reads_before_resume = thread_store.calls().await.read_thread_with_history;
-    // The in-memory store is pathless, so resume currently fails later while
-    // assembling the response. The history-bearing probe must still be reused.
-    let _resume_result = client
+    let resume_result = client
         .request(ClientRequest::ThreadResume {
             request_id: RequestId::Integer(3),
             params: ThreadResumeParams {
@@ -269,7 +268,14 @@ async fn cold_thread_resume_reuses_non_local_history_probe() -> Result<()> {
                 ..Default::default()
             },
         })
-        .await?;
+        .await?
+        .expect("thread/resume should succeed");
+    let ThreadResumeResponse {
+        thread: resumed, ..
+    } = serde_json::from_value(resume_result)?;
+
+    assert_eq!(resumed.id, thread.id);
+    assert_eq!(resumed.path, None);
 
     assert_eq!(
         thread_store.calls().await.read_thread_with_history,

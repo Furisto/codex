@@ -219,6 +219,9 @@ fn apply_thread_store_config_snapshot_to_resume_overrides(
     if typesafe_overrides.personality.is_none() {
         typesafe_overrides.personality = config_snapshot.personality;
     }
+    if typesafe_overrides.developer_instructions.is_none() {
+        typesafe_overrides.developer_instructions = config_snapshot.developer_instructions.clone();
+    }
     if typesafe_overrides.ephemeral.is_none() {
         typesafe_overrides.ephemeral = Some(config_snapshot.ephemeral);
     }
@@ -239,6 +242,68 @@ fn apply_thread_store_config_snapshot_to_resume_overrides(
         request_overrides.insert("model_reasoning_summary".to_string(), value);
     }
     Ok(())
+}
+
+fn persisted_profile_workspace_roots(
+    config_snapshot: &StoredThreadConfigSnapshot,
+) -> Result<Vec<AbsolutePathBuf>, JSONRPCErrorError> {
+    config_snapshot
+        .profile_workspace_roots
+        .iter()
+        .map(|workspace_root| {
+            AbsolutePathBuf::from_absolute_path_checked(workspace_root).map_err(|err| {
+                invalid_params(format!(
+                    "invalid persisted thread config profile workspace root `{}`: {err}",
+                    workspace_root.display()
+                ))
+            })
+        })
+        .collect()
+}
+
+fn apply_thread_store_config_snapshot_to_loaded_config(
+    config: &mut Config,
+    config_snapshot: &StoredThreadConfigSnapshot,
+    preserve_request_permission_override: bool,
+) -> Result<(), JSONRPCErrorError> {
+    if preserve_request_permission_override {
+        return Ok(());
+    }
+
+    let permission_snapshot = if let Some(active_permission_profile) =
+        config_snapshot.active_permission_profile.clone()
+    {
+        codex_core::config::PermissionProfileSnapshot::active_with_profile_workspace_roots(
+            config_snapshot.permission_profile.clone(),
+            active_permission_profile,
+            persisted_profile_workspace_roots(config_snapshot)?,
+        )
+    } else {
+        codex_core::config::PermissionProfileSnapshot::legacy(
+            config_snapshot.permission_profile.clone(),
+        )
+    };
+    config
+        .permissions
+        .replace_permission_profile_from_session_snapshot(permission_snapshot)
+        .map_err(|err| {
+            invalid_params(format!(
+                "invalid persisted thread config permission profile: {err}"
+            ))
+        })?;
+    Ok(())
+}
+
+fn thread_store_config_snapshot_for_resume_spawn(
+    mut config_snapshot: StoredThreadConfigSnapshot,
+    config: &Config,
+) -> StoredThreadConfigSnapshot {
+    config_snapshot.collaboration_mode = config_snapshot.collaboration_mode.with_updates(
+        config.model.clone(),
+        Some(config.model_reasoning_effort.clone()),
+        /*developer_instructions*/ None,
+    );
+    config_snapshot
 }
 
 fn normalize_thread_list_cwd_filters(
@@ -2796,6 +2861,13 @@ impl ThreadRequestProcessor {
 
         let history_cwd = thread_history.session_cwd();
         let runtime_workspace_roots = runtime_workspace_roots.map(resolve_runtime_workspace_roots);
+        let request_overrides_permission_profile = sandbox.is_some()
+            || permissions.is_some()
+            || request_overrides.as_ref().is_some_and(|overrides| {
+                overrides.contains_key("sandbox_mode")
+                    || overrides.contains_key("permission_profile")
+                    || overrides.contains_key("default_permissions")
+            });
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
@@ -2832,7 +2904,7 @@ impl ThreadRequestProcessor {
         }
 
         // Derive a Config using the same logic as new conversation, honoring overrides if provided.
-        let config = match self
+        let mut config = match self
             .config_manager
             .load_for_cwd(request_overrides, typesafe_overrides, history_cwd)
             .await
@@ -2844,20 +2916,45 @@ impl ThreadRequestProcessor {
                 return Ok(());
             }
         };
+        if let Some(config_snapshot) = stored_config_snapshot.as_ref()
+            && let Err(error) = apply_thread_store_config_snapshot_to_loaded_config(
+                &mut config,
+                config_snapshot,
+                request_overrides_permission_profile,
+            )
+        {
+            self.outgoing.send_error(request_id, error).await;
+            return Ok(());
+        }
 
         let response_history = thread_history.clone();
 
-        match self
-            .thread_manager
-            .resume_thread_with_history(
-                config,
-                thread_history,
-                self.auth_manager.clone(),
-                self.request_trace_context(&request_id).await,
-                supports_openai_form_elicitation,
-            )
-            .await
-        {
+        let resume_thread_result = if let Some(config_snapshot) = stored_config_snapshot {
+            let config_snapshot =
+                thread_store_config_snapshot_for_resume_spawn(config_snapshot, &config);
+            self.thread_manager
+                .resume_thread_with_history_from_snapshot(
+                    config,
+                    thread_history,
+                    self.auth_manager.clone(),
+                    self.request_trace_context(&request_id).await,
+                    supports_openai_form_elicitation,
+                    config_snapshot,
+                )
+                .await
+        } else {
+            self.thread_manager
+                .resume_thread_with_history(
+                    config,
+                    thread_history,
+                    self.auth_manager.clone(),
+                    self.request_trace_context(&request_id).await,
+                    supports_openai_form_elicitation,
+                )
+                .await
+        };
+
+        match resume_thread_result {
             Ok(NewThread {
                 thread_id,
                 thread: codex_thread,
@@ -2876,12 +2973,6 @@ impl ThreadRequestProcessor {
                 }
                 let instruction_sources = codex_thread.legacy_instruction_sources().await;
                 let SessionConfiguredEvent { rollout_path, .. } = session_configured;
-                let Some(rollout_path) = rollout_path else {
-                    let error =
-                        internal_error(format!("rollout path missing for thread {thread_id}"));
-                    self.outgoing.send_error(request_id, error).await;
-                    return Ok(());
-                };
                 // Auto-attach a thread listener when resuming a thread.
                 log_listener_attach_result(
                     self.ensure_conversation_listener(
@@ -2900,7 +2991,7 @@ impl ThreadRequestProcessor {
                         thread_id,
                         codex_thread.as_ref(),
                         &response_history,
-                        rollout_path.as_path(),
+                        rollout_path.as_deref(),
                         resume_source_thread,
                         include_turns,
                     )
@@ -3357,7 +3448,7 @@ impl ThreadRequestProcessor {
         thread_id: ThreadId,
         thread: &CodexThread,
         thread_history: &InitialHistory,
-        rollout_path: &Path,
+        rollout_path: Option<&Path>,
         resume_source_thread: Option<StoredThread>,
         include_turns: bool,
     ) -> std::result::Result<Thread, String> {
@@ -3426,7 +3517,7 @@ impl ThreadRequestProcessor {
                     thread_id,
                     session_id.clone(),
                     &config_snapshot,
-                    Some(rollout_path.into()),
+                    rollout_path.map(Path::to_path_buf),
                 );
                 thread.preview = preview_from_rollout_items(items);
                 Ok(thread)
@@ -3438,7 +3529,7 @@ impl ThreadRequestProcessor {
         let mut thread = thread?;
         thread.id = thread_id.to_string();
         thread.session_id = session_id;
-        thread.path = Some(rollout_path.to_path_buf());
+        thread.path = rollout_path.map(Path::to_path_buf);
         if include_turns {
             let history_items = thread_history.get_rollout_items();
             populate_thread_turns_from_history(
