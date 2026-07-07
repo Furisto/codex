@@ -367,6 +367,8 @@ mod tests {
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("first live write")],
             })
             .await
@@ -389,6 +391,8 @@ mod tests {
         let err = store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("write after shutdown")],
             })
             .await
@@ -420,6 +424,8 @@ mod tests {
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("raw append")],
             })
             .await
@@ -831,6 +837,8 @@ mod tests {
         let err = store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("write after discard")],
             })
             .await
@@ -854,6 +862,8 @@ mod tests {
         first_store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("before resume")],
             })
             .await
@@ -889,6 +899,8 @@ mod tests {
         resumed_store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("after resume")],
             })
             .await
@@ -1000,6 +1012,8 @@ mod tests {
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("external history item")],
             })
             .await
@@ -1086,6 +1100,8 @@ mod tests {
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("archived live history item")],
             })
             .await
@@ -1144,6 +1160,8 @@ mod tests {
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
+                idempotency_key: None,
+                expected_next_seq: None,
                 items: vec![user_message_item("path read")],
             })
             .await

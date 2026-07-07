@@ -262,6 +262,8 @@ impl ExternalAgentSessionImporter {
                 .thread_store
                 .append_items(AppendThreadItemsParams {
                     thread_id,
+                    idempotency_key: None,
+                    expected_next_seq: None,
                     items: rollout_items,
                 })
                 .await

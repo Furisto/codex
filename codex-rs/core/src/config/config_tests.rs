@@ -3804,7 +3804,7 @@ async fn legacy_remote_thread_store_endpoint_is_rejected() {
 async fn aws_object_log_thread_store_config_loads() -> anyhow::Result<()> {
     let cfg: ConfigToml = toml::from_str(
         r#"
-experimental_thread_store = { type = "aws_object_log", namespace = "customer-prod", payload_prefix = "thread-payloads" }
+experimental_thread_store = { type = "aws_object_log", namespace = "customer-prod", table_name = "codex-threads", bucket_name = "codex-thread-payloads", key_prefix = "thread-payloads", aws_region = "us-east-1", endpoint_url = "http://localhost:4566" }
 "#,
     )?;
 
@@ -3819,7 +3819,14 @@ experimental_thread_store = { type = "aws_object_log", namespace = "customer-pro
         config.experimental_thread_store,
         ThreadStoreConfig::AwsObjectLog {
             namespace: "customer-prod".to_string(),
-            payload_prefix: Some("thread-payloads".to_string()),
+            table_name: "codex-threads".to_string(),
+            bucket_name: "codex-thread-payloads".to_string(),
+            key_prefix: Some("thread-payloads".to_string()),
+            aws_region: Some("us-east-1".to_string()),
+            endpoint_url: Some("http://localhost:4566".to_string()),
+            kms_key_id: None,
+            gsi_updated_index_name: None,
+            gsi_created_index_name: None,
         }
     );
     Ok(())

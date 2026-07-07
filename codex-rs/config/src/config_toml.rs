@@ -560,7 +560,14 @@ pub enum ThreadStoreToml {
     },
     AwsObjectLog {
         namespace: String,
-        payload_prefix: Option<String>,
+        table_name: String,
+        bucket_name: String,
+        key_prefix: Option<String>,
+        aws_region: Option<String>,
+        endpoint_url: Option<String>,
+        kms_key_id: Option<String>,
+        gsi_updated_index_name: Option<String>,
+        gsi_created_index_name: Option<String>,
     },
 }
 

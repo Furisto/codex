@@ -1,5 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::RolloutItem;
@@ -35,6 +39,8 @@ pub struct LiveThread {
     thread_store: Arc<dyn ThreadStore>,
     metadata_sync: Arc<Mutex<ThreadMetadataSync>>,
     persistence_telemetry: RolloutPersistenceTelemetry,
+    writer_id: Arc<str>,
+    append_ordinal: Arc<AtomicU64>,
 }
 
 /// Owns a live thread while session initialization is still fallible.
@@ -99,6 +105,8 @@ impl LiveThread {
             thread_store,
             metadata_sync: Arc::new(Mutex::new(metadata_sync)),
             persistence_telemetry: RolloutPersistenceTelemetry::new(thread_id),
+            writer_id: new_live_thread_writer_id().into(),
+            append_ordinal: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -135,6 +143,8 @@ impl LiveThread {
             thread_store,
             metadata_sync: Arc::new(Mutex::new(metadata_sync)),
             persistence_telemetry: RolloutPersistenceTelemetry::new(thread_id),
+            writer_id: new_live_thread_writer_id().into(),
+            append_ordinal: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -157,6 +167,8 @@ impl LiveThread {
         self.thread_store
             .append_items(AppendThreadItemsParams {
                 thread_id: self.thread_id,
+                idempotency_key: Some(self.next_append_idempotency_key()),
+                expected_next_seq: None,
                 items: items.to_vec(),
             })
             .await?;
@@ -185,6 +197,14 @@ impl LiveThread {
                 .mark_pending_update_applied(&update);
         }
         Ok(())
+    }
+
+    fn next_append_idempotency_key(&self) -> String {
+        let ordinal = self.append_ordinal.fetch_add(1, Ordering::Relaxed) + 1;
+        format!(
+            "thread:{}:writer:{}:append:{ordinal}",
+            self.thread_id, self.writer_id
+        )
     }
 
     pub async fn persist(&self) -> ThreadStoreResult<()> {
@@ -319,4 +339,12 @@ impl LiveThread {
             .mark_pending_update_applied(&update);
         Ok(())
     }
+}
+
+fn new_live_thread_writer_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", std::process::id())
 }

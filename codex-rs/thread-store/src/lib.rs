@@ -23,6 +23,7 @@ pub use local::LocalThreadStore;
 pub use local::LocalThreadStoreConfig;
 pub use remote::AwsObjectLogAppendOptions;
 pub use remote::AwsObjectLogAppendResult;
+pub use remote::AwsObjectLogCompression;
 pub use remote::AwsObjectLogThreadStore;
 pub use remote::AwsObjectLogThreadStoreConfig;
 pub use store::ThreadStore;

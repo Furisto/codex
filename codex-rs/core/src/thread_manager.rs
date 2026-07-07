@@ -292,15 +292,32 @@ pub fn thread_store_from_config(
         ThreadStoreConfig::InMemory { id } => InMemoryThreadStore::for_id(id),
         ThreadStoreConfig::AwsObjectLog {
             namespace,
-            payload_prefix,
-        } => Arc::new(AwsObjectLogThreadStore::new(
-            AwsObjectLogThreadStoreConfig {
-                namespace: namespace.clone(),
-                payload_prefix: payload_prefix
-                    .clone()
-                    .unwrap_or_else(|| format!("tenants/{namespace}/threads")),
-            },
-        )),
+            table_name,
+            bucket_name,
+            key_prefix,
+            aws_region,
+            endpoint_url,
+            kms_key_id,
+            gsi_updated_index_name,
+            gsi_created_index_name,
+        } => {
+            let mut store_config = AwsObjectLogThreadStoreConfig::new(
+                table_name.clone(),
+                bucket_name.clone(),
+                namespace.clone(),
+                key_prefix.clone(),
+            );
+            store_config.aws_region.clone_from(aws_region);
+            store_config.endpoint_url.clone_from(endpoint_url);
+            store_config.kms_key_id.clone_from(kms_key_id);
+            if let Some(index_name) = gsi_updated_index_name {
+                store_config.gsi_updated_index_name.clone_from(index_name);
+            }
+            if let Some(index_name) = gsi_created_index_name {
+                store_config.gsi_created_index_name.clone_from(index_name);
+            }
+            Arc::new(AwsObjectLogThreadStore::new(store_config))
+        }
     }
 }
 

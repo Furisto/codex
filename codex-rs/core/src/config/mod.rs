@@ -605,7 +605,14 @@ pub enum ThreadStoreConfig {
     /// AWS object-log thread store for shared durable persistence.
     AwsObjectLog {
         namespace: String,
-        payload_prefix: Option<String>,
+        table_name: String,
+        bucket_name: String,
+        key_prefix: Option<String>,
+        aws_region: Option<String>,
+        endpoint_url: Option<String>,
+        kms_key_id: Option<String>,
+        gsi_updated_index_name: Option<String>,
+        gsi_created_index_name: Option<String>,
     },
 }
 
@@ -2238,10 +2245,24 @@ fn thread_store_config(thread_store: Option<ThreadStoreToml>) -> ThreadStoreConf
         Some(ThreadStoreToml::InMemory { id }) => ThreadStoreConfig::InMemory { id },
         Some(ThreadStoreToml::AwsObjectLog {
             namespace,
-            payload_prefix,
+            table_name,
+            bucket_name,
+            key_prefix,
+            aws_region,
+            endpoint_url,
+            kms_key_id,
+            gsi_updated_index_name,
+            gsi_created_index_name,
         }) => ThreadStoreConfig::AwsObjectLog {
             namespace,
-            payload_prefix,
+            table_name,
+            bucket_name,
+            key_prefix,
+            aws_region,
+            endpoint_url,
+            kms_key_id,
+            gsi_updated_index_name,
+            gsi_created_index_name,
         },
         None => ThreadStoreConfig::Local,
     }

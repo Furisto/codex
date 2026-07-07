@@ -2906,10 +2906,31 @@
         },
         {
           "properties": {
+            "aws_region": {
+              "type": "string"
+            },
+            "bucket_name": {
+              "type": "string"
+            },
+            "endpoint_url": {
+              "type": "string"
+            },
+            "gsi_created_index_name": {
+              "type": "string"
+            },
+            "gsi_updated_index_name": {
+              "type": "string"
+            },
+            "key_prefix": {
+              "type": "string"
+            },
+            "kms_key_id": {
+              "type": "string"
+            },
             "namespace": {
               "type": "string"
             },
-            "payload_prefix": {
+            "table_name": {
               "type": "string"
             },
             "type": {
@@ -2920,7 +2941,9 @@
             }
           },
           "required": [
+            "bucket_name",
             "namespace",
+            "table_name",
             "type"
           ],
           "type": "object"

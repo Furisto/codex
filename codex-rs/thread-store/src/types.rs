@@ -174,6 +174,16 @@ pub(crate) fn canonical_history_mode_from_rollout_items(
 pub struct AppendThreadItemsParams {
     /// Thread id to append to.
     pub thread_id: ThreadId,
+    /// Retry-stable key for this logical append attempt.
+    ///
+    /// Local stores may ignore this field. Remote stores that provide idempotent append semantics
+    /// should require it for non-empty durable appends.
+    pub idempotency_key: Option<String>,
+    /// Optional caller-observed next sequence number.
+    ///
+    /// Stores with ordered commit logs can use this to fail closed when a caller's view of the
+    /// thread head is stale.
+    pub expected_next_seq: Option<u64>,
     /// Raw rollout items to append in order.
     ///
     /// Store implementations are responsible for applying the shared rollout persistence policy

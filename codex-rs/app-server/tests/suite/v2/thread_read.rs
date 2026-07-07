@@ -599,6 +599,8 @@ async fn thread_read_loaded_include_turns_reads_store_history_without_rollout_pa
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
+            idempotency_key: None,
+            expected_next_seq: None,
             items: store_history_items(),
         })
         .await?;
@@ -1500,6 +1502,8 @@ async fn seed_pathless_store_thread(
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
+            idempotency_key: None,
+            expected_next_seq: None,
             items: store_history_items(),
         })
         .await?;
