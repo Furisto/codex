@@ -420,6 +420,11 @@ system-configuration = "0.7"
 tar = { version = "=0.4.45", default-features = false }
 tempfile = "3.23.0"
 test-log = "0.2.19"
+testcontainers = "0.27.3"
+testcontainers-modules = { version = "0.15.0", default-features = false, features = [
+    "localstack",
+    "ring",
+] }
 textwrap = "0.16.2"
 thiserror = "2.0.17"
 time = "0.3.47"
