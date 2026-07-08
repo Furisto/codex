@@ -2,7 +2,7 @@ mod config;
 mod records;
 
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::Debug;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_dynamodb::Client as DynamoDbClient;
@@ -1586,8 +1586,31 @@ fn timestamp_millis(timestamp: DateTime<Utc>) -> i64 {
     timestamp.timestamp_millis()
 }
 
-fn internal_aws_error<E: Display>(context: &'static str) -> impl FnOnce(E) -> ThreadStoreError {
+fn internal_aws_error<E: Debug>(context: &'static str) -> impl FnOnce(E) -> ThreadStoreError {
     move |err| ThreadStoreError::Internal {
-        message: format!("{context}: {err}"),
+        message: format!("{context}: {}", sanitized_aws_error(err)),
+    }
+}
+
+fn sanitized_aws_error<E: Debug>(err: E) -> String {
+    let mut message = format!("{err:?}");
+    redact_xml_element(&mut message, "Token-0");
+    if message.len() > 2048 {
+        message.truncate(2048);
+        message.push_str("...");
+    }
+    message
+}
+
+fn redact_xml_element(message: &mut String, element: &str) {
+    let open = format!("<{element}>");
+    let close = format!("</{element}>");
+    while let Some(start) = message.find(open.as_str()) {
+        let value_start = start + open.len();
+        let Some(relative_end) = message[value_start..].find(close.as_str()) else {
+            return;
+        };
+        let value_end = value_start + relative_end;
+        message.replace_range(value_start..value_end, "[REDACTED]");
     }
 }

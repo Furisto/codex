@@ -2137,7 +2137,128 @@ impl TokenUsageInfo {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
+    #[serde(default, deserialize_with = "deserialize_rate_limits_compat")]
     pub rate_limits: Option<RateLimitSnapshot>,
+}
+
+fn deserialize_rate_limits_compat<'de, D>(
+    deserializer: D,
+) -> Result<Option<RateLimitSnapshot>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(value) = Option::<Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+
+    if let Some(snapshot) = legacy_rate_limit_snapshot(&value) {
+        return Ok(Some(snapshot));
+    }
+
+    if let Value::Object(fields) = &value {
+        let has_snapshot_field = [
+            "limit_id",
+            "limit_name",
+            "primary",
+            "secondary",
+            "credits",
+            "individual_limit",
+            "plan_type",
+            "rate_limit_reached_type",
+        ]
+        .iter()
+        .any(|field| fields.contains_key(*field));
+
+        if has_snapshot_field && let Ok(snapshot) = serde_json::from_value(value) {
+            return Ok(Some(snapshot));
+        }
+    }
+
+    Ok(None)
+}
+
+fn legacy_rate_limit_snapshot(value: &Value) -> Option<RateLimitSnapshot> {
+    match value {
+        Value::Number(number) => number.as_f64().map(|used_percent| {
+            rate_limit_snapshot_from_windows(
+                Some(RateLimitWindow {
+                    used_percent,
+                    window_minutes: None,
+                    resets_at: None,
+                }),
+                None,
+            )
+        }),
+        Value::Object(fields) => {
+            let primary = fields
+                .get("primary_used_percent")
+                .and_then(Value::as_f64)
+                .map(|used_percent| RateLimitWindow {
+                    used_percent,
+                    window_minutes: fields.get("primary_window_minutes").and_then(value_as_i64),
+                    resets_at: None,
+                })
+                .or_else(|| {
+                    fields
+                        .get("primary")
+                        .and_then(Value::as_f64)
+                        .map(|used_percent| RateLimitWindow {
+                            used_percent,
+                            window_minutes: None,
+                            resets_at: None,
+                        })
+                });
+            let secondary = fields
+                .get("secondary_used_percent")
+                .and_then(Value::as_f64)
+                .map(|used_percent| RateLimitWindow {
+                    used_percent,
+                    window_minutes: fields
+                        .get("secondary_window_minutes")
+                        .and_then(value_as_i64),
+                    resets_at: None,
+                })
+                .or_else(|| {
+                    fields
+                        .get("secondary")
+                        .and_then(Value::as_f64)
+                        .map(|used_percent| RateLimitWindow {
+                            used_percent,
+                            window_minutes: None,
+                            resets_at: None,
+                        })
+                });
+
+            if primary.is_some() || secondary.is_some() {
+                Some(rate_limit_snapshot_from_windows(primary, secondary))
+            } else {
+                None
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::String(_) | Value::Array(_) => None,
+    }
+}
+
+fn rate_limit_snapshot_from_windows(
+    primary: Option<RateLimitWindow>,
+    secondary: Option<RateLimitWindow>,
+) -> RateLimitSnapshot {
+    RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        primary,
+        secondary,
+        credits: None,
+        individual_limit: None,
+        plan_type: None,
+        rate_limit_reached_type: None,
+    }
+}
+
+fn value_as_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
@@ -5936,6 +6057,184 @@ mod tests {
         assert_eq!(value["msg"]["failed"][0]["error"], "bad");
         assert_eq!(value["msg"]["cancelled"][0], "c");
         Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_current_rate_limit_snapshot_in_rollout_item() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!({
+            "limit_id": "codex",
+            "limit_name": null,
+            "primary": {
+                "used_percent": 1.0,
+                "window_minutes": 300,
+                "resets_at": 1_783_555_884
+            },
+            "secondary": {
+                "used_percent": 1.0,
+                "window_minutes": 10_080,
+                "resets_at": 1_784_057_923
+            },
+            "credits": null,
+            "individual_limit": null,
+            "plan_type": "team",
+            "rate_limit_reached_type": null
+        }))?;
+
+        assert_eq!(
+            event.rate_limits,
+            Some(RateLimitSnapshot {
+                limit_id: Some("codex".to_string()),
+                limit_name: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 1.0,
+                    window_minutes: Some(300),
+                    resets_at: Some(1_783_555_884),
+                }),
+                secondary: Some(RateLimitWindow {
+                    used_percent: 1.0,
+                    window_minutes: Some(10_080),
+                    resets_at: Some(1_784_057_923),
+                }),
+                credits: None,
+                individual_limit: None,
+                plan_type: Some(crate::account::PlanType::Team),
+                rate_limit_reached_type: None,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_legacy_flat_rate_limit_snapshot() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!({
+            "primary_used_percent": 12.5,
+            "secondary_used_percent": 75.0,
+            "primary_to_secondary_ratio_percent": 16.6,
+            "primary_window_minutes": 300,
+            "secondary_window_minutes": 10_080
+        }))?;
+
+        assert_eq!(
+            event.rate_limits,
+            Some(RateLimitSnapshot {
+                limit_id: None,
+                limit_name: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 12.5,
+                    window_minutes: Some(300),
+                    resets_at: None,
+                }),
+                secondary: Some(RateLimitWindow {
+                    used_percent: 75.0,
+                    window_minutes: Some(10_080),
+                    resets_at: None,
+                }),
+                credits: None,
+                individual_limit: None,
+                plan_type: None,
+                rate_limit_reached_type: None,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_legacy_numeric_rate_limits() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!({
+            "primary": 42.0,
+            "secondary": 84.0
+        }))?;
+
+        assert_eq!(
+            event.rate_limits,
+            Some(RateLimitSnapshot {
+                limit_id: None,
+                limit_name: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 42.0,
+                    window_minutes: None,
+                    resets_at: None,
+                }),
+                secondary: Some(RateLimitWindow {
+                    used_percent: 84.0,
+                    window_minutes: None,
+                    resets_at: None,
+                }),
+                credits: None,
+                individual_limit: None,
+                plan_type: None,
+                rate_limit_reached_type: None,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_single_numeric_rate_limit_as_primary() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!(64.0))?;
+
+        assert_eq!(
+            event.rate_limits,
+            Some(RateLimitSnapshot {
+                limit_id: None,
+                limit_name: None,
+                primary: Some(RateLimitWindow {
+                    used_percent: 64.0,
+                    window_minutes: None,
+                    resets_at: None,
+                }),
+                secondary: None,
+                credits: None,
+                individual_limit: None,
+                plan_type: None,
+                rate_limit_reached_type: None,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_unknown_rate_limits_as_none() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!({
+            "unexpected": {
+                "shape": true
+            }
+        }))?;
+
+        assert_eq!(event.rate_limits, None);
+        Ok(())
+    }
+
+    #[test]
+    fn token_count_event_deserializes_malformed_rate_limits_as_none() -> Result<()> {
+        let event = deserialize_token_count_rollout_item(json!({
+            "primary": {
+                "used_percent": {
+                    "not": "a number"
+                },
+                "window_minutes": 300,
+                "resets_at": 1_783_555_884
+            }
+        }))?;
+
+        assert_eq!(event.rate_limits, None);
+        Ok(())
+    }
+
+    fn deserialize_token_count_rollout_item(rate_limits: Value) -> Result<TokenCountEvent> {
+        let item: RolloutItem = serde_json::from_value(json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": null,
+                "rate_limits": rate_limits
+            }
+        }))?;
+
+        let RolloutItem::EventMsg(EventMsg::TokenCount(event)) = item else {
+            panic!("expected token count rollout item");
+        };
+        Ok(event)
     }
 
     #[test]
