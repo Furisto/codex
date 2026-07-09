@@ -3,13 +3,14 @@ use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use codex_protocol::ThreadId;
+use serde::Deserialize;
 use serde::Serialize;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 
 use super::epoch_millis_to_datetime;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadGoalStatus {
     Active,

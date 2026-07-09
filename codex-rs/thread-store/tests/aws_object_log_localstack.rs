@@ -31,6 +31,10 @@ use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
+use codex_state::GoalAccountingMode;
+use codex_state::GoalAccountingOutcome;
+use codex_state::GoalUpdate;
+use codex_state::ThreadGoalStatus;
 use codex_thread_store::AppendThreadItemsParams;
 use codex_thread_store::ArchiveThreadParams;
 use codex_thread_store::AwsObjectLogAppendOptions;
@@ -197,6 +201,68 @@ async fn aws_object_log_persists_history_and_config_in_localstack() -> TestResul
         .await?;
     assert_eq!(history.items.len(), 2);
 
+    let goal_store = replacement_store
+        .goal_store()
+        .expect("AWS object-log should expose durable goals");
+    let goal = goal_store
+        .replace_thread_goal(
+            thread_id,
+            "ship AWS goal storage".to_string(),
+            ThreadGoalStatus::Active,
+            Some(10),
+        )
+        .await?;
+    assert_eq!(
+        Some(goal.clone()),
+        goal_store.get_thread_goal(thread_id).await?
+    );
+    assert_eq!(
+        None,
+        goal_store
+            .update_thread_goal(
+                thread_id,
+                GoalUpdate {
+                    objective: Some("stale update".to_string()),
+                    status: None,
+                    token_budget: None,
+                    expected_goal_id: Some("stale-goal-id".to_string()),
+                },
+            )
+            .await?
+    );
+    let updated = goal_store
+        .update_thread_goal(
+            thread_id,
+            GoalUpdate {
+                objective: Some("ship AWS goal storage v2".to_string()),
+                status: Some(ThreadGoalStatus::Active),
+                token_budget: Some(Some(10)),
+                expected_goal_id: Some(goal.goal_id.clone()),
+            },
+        )
+        .await?
+        .expect("current goal update should succeed");
+    assert_eq!("ship AWS goal storage v2", updated.objective);
+    let outcome = goal_store
+        .account_thread_goal_usage(
+            thread_id,
+            /*time_delta_seconds*/ 3,
+            /*token_delta*/ 12,
+            GoalAccountingMode::ActiveOnly,
+            Some(updated.goal_id.clone()),
+        )
+        .await?;
+    let GoalAccountingOutcome::Updated(accounted) = outcome else {
+        panic!("goal accounting should update active goal");
+    };
+    assert_eq!(ThreadGoalStatus::BudgetLimited, accounted.status);
+    assert_eq!(12, accounted.tokens_used);
+    assert_eq!(
+        Some(accounted.clone()),
+        goal_store.delete_thread_goal(thread_id).await?
+    );
+    assert_eq!(None, goal_store.get_thread_goal(thread_id).await?);
+
     assert!(matches!(
         replacement_store
             .append_items_with_options(
@@ -237,10 +303,18 @@ async fn aws_object_log_persists_history_and_config_in_localstack() -> TestResul
 }
 
 fn is_docker_unavailable(err: &(dyn Error + Send + Sync)) -> bool {
-    let message = err.to_string();
-    message.contains("SocketNotFoundError")
-        || message.contains("No such file or directory")
-        || message.contains("Cannot connect to the Docker daemon")
+    let mut current = Some(err as &dyn Error);
+    while let Some(err) = current {
+        let message = format!("{err} {err:?}");
+        if message.contains("SocketNotFoundError")
+            || message.contains("No such file or directory")
+            || message.contains("Cannot connect to the Docker daemon")
+        {
+            return true;
+        }
+        current = err.source();
+    }
+    false
 }
 
 async fn assert_list_contains(

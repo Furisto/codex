@@ -333,6 +333,10 @@ pub fn local_agent_graph_store_from_state_db(
 }
 
 impl ThreadManager {
+    pub fn thread_store(&self) -> Arc<dyn ThreadStore> {
+        Arc::clone(&self.state.thread_store)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &Config,

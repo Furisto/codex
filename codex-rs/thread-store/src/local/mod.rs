@@ -242,6 +242,12 @@ impl ThreadStore for LocalThreadStore {
         self
     }
 
+    fn goal_store(&self) -> Option<Arc<dyn codex_state::ThreadGoalStore>> {
+        self.state_db.as_ref().map(|state_db| {
+            Arc::new(state_db.thread_goals().clone()) as Arc<dyn codex_state::ThreadGoalStore>
+        })
+    }
+
     fn create_thread(&self, params: CreateThreadParams) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move { live_writer::create_thread(self, params).await })
     }

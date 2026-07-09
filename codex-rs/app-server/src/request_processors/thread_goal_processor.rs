@@ -5,6 +5,11 @@ use codex_goal_extension::GoalServiceError;
 use codex_goal_extension::GoalSetRequest;
 use codex_goal_extension::GoalTokenBudgetUpdate;
 
+struct ResolvedThreadGoalStore {
+    goal_store: Arc<dyn codex_state::ThreadGoalStore>,
+    local_state_db: Option<StateDbHandle>,
+}
+
 #[derive(Clone)]
 pub(crate) struct ThreadGoalRequestProcessor {
     thread_manager: Arc<ThreadManager>,
@@ -80,18 +85,14 @@ impl ThreadGoalRequestProcessor {
     pub(crate) async fn pending_resume_goal_state(
         &self,
         thread: &CodexThread,
-    ) -> (bool, Option<StateDbHandle>) {
+    ) -> (bool, Option<Arc<dyn codex_state::ThreadGoalStore>>) {
         let emit_thread_goal_update = self.config.features.enabled(Feature::Goals);
-        let thread_goal_state_db = if emit_thread_goal_update {
-            if let Some(state_db) = thread.state_db() {
-                Some(state_db)
-            } else {
-                self.state_db.clone()
-            }
+        let thread_goal_store = if emit_thread_goal_update {
+            self.goal_store_for_running_thread(thread).await
         } else {
             None
         };
-        (emit_thread_goal_update, thread_goal_state_db)
+        (emit_thread_goal_update, thread_goal_store)
     }
 
     async fn thread_goal_set_inner(
@@ -104,9 +105,11 @@ impl ThreadGoalRequestProcessor {
         }
 
         let thread_id = parse_thread_id_for_request(params.thread_id.as_str())?;
-        let state_db = self.state_db_for_materialized_thread(thread_id).await?;
-        self.reconcile_thread_goal_rollout(thread_id, &state_db)
-            .await?;
+        let resolved = self.goal_store_for_thread(thread_id).await?;
+        if let Some(state_db) = resolved.local_state_db.as_ref() {
+            self.reconcile_thread_goal_rollout(thread_id, state_db)
+                .await?;
+        }
 
         let listener_command_tx = {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
@@ -119,7 +122,8 @@ impl ThreadGoalRequestProcessor {
         let outcome = self
             .goal_service
             .set_thread_goal(
-                &state_db,
+                resolved.goal_store.as_ref(),
+                resolved.local_state_db.as_deref(),
                 GoalSetRequest {
                     thread_id,
                     objective: objective
@@ -171,10 +175,10 @@ impl ThreadGoalRequestProcessor {
         }
 
         let thread_id = parse_thread_id_for_request(params.thread_id.as_str())?;
-        let state_db = self.state_db_for_materialized_thread(thread_id).await?;
+        let resolved = self.goal_store_for_thread(thread_id).await?;
         let goal = self
             .goal_service
-            .get_thread_goal(&state_db, thread_id)
+            .get_thread_goal(resolved.goal_store.as_ref(), thread_id)
             .await
             .map_err(goal_service_error)?
             .map(ThreadGoal::from);
@@ -191,9 +195,11 @@ impl ThreadGoalRequestProcessor {
         }
 
         let thread_id = parse_thread_id_for_request(params.thread_id.as_str())?;
-        let state_db = self.state_db_for_materialized_thread(thread_id).await?;
-        self.reconcile_thread_goal_rollout(thread_id, &state_db)
-            .await?;
+        let resolved = self.goal_store_for_thread(thread_id).await?;
+        if let Some(state_db) = resolved.local_state_db.as_ref() {
+            self.reconcile_thread_goal_rollout(thread_id, state_db)
+                .await?;
+        }
 
         let listener_command_tx = {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
@@ -202,7 +208,7 @@ impl ThreadGoalRequestProcessor {
         };
         let cleared = self
             .goal_service
-            .clear_thread_goal(&state_db, thread_id)
+            .clear_thread_goal(resolved.goal_store.as_ref(), thread_id)
             .await
             .map_err(goal_service_error)?;
 
@@ -216,19 +222,71 @@ impl ThreadGoalRequestProcessor {
         Ok(())
     }
 
-    async fn state_db_for_materialized_thread(
+    async fn goal_store_for_thread(
         &self,
         thread_id: ThreadId,
-    ) -> Result<StateDbHandle, JSONRPCErrorError> {
+    ) -> Result<ResolvedThreadGoalStore, JSONRPCErrorError> {
+        let thread_store = self.thread_manager.thread_store();
+        let goal_store = thread_store.goal_store().ok_or_else(|| {
+            invalid_request("thread goals are not supported by this thread store")
+        })?;
+        let local_state_db = self.local_state_db_for_goal_store(thread_id).await?;
+
         if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
-            if thread.rollout_path().is_none() {
-                return Err(invalid_request(format!(
-                    "ephemeral thread does not support goals: {thread_id}"
-                )));
+            return Ok(ResolvedThreadGoalStore {
+                goal_store,
+                local_state_db: thread.state_db().or(local_state_db),
+            });
+        }
+
+        match thread_store
+            .read_thread(StoreReadThreadParams {
+                thread_id,
+                include_archived: true,
+                include_history: false,
+            })
+            .await
+        {
+            Ok(_) => Ok(ResolvedThreadGoalStore {
+                goal_store,
+                local_state_db,
+            }),
+            Err(ThreadStoreError::ThreadNotFound { .. }) => {
+                Err(invalid_request(format!("thread not found: {thread_id}")))
             }
-            if let Some(state_db) = thread.state_db() {
-                return Ok(state_db);
-            }
+            Err(err) => Err(internal_error(format!(
+                "failed to resolve thread {thread_id} for goals: {err}"
+            ))),
+        }
+    }
+
+    async fn goal_store_for_running_thread(
+        &self,
+        thread: &CodexThread,
+    ) -> Option<Arc<dyn codex_state::ThreadGoalStore>> {
+        let Some(goal_store) = self.thread_manager.thread_store().goal_store() else {
+            tracing::debug!(
+                thread_id = %thread.session_configured().thread_id,
+                "thread store does not support goal snapshots"
+            );
+            return None;
+        };
+        Some(goal_store)
+    }
+
+    async fn local_state_db_for_goal_store(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<Option<StateDbHandle>, JSONRPCErrorError> {
+        let thread_store = self.thread_manager.thread_store();
+        if !thread_store.as_any().is::<LocalThreadStore>() {
+            return Ok(None);
+        }
+
+        if let Ok(thread) = self.thread_manager.get_thread(thread_id).await
+            && let Some(state_db) = thread.state_db()
+        {
+            return Ok(Some(state_db));
         } else {
             codex_rollout::find_thread_path_by_id_str(
                 &self.config.codex_home,
@@ -242,9 +300,9 @@ impl ThreadGoalRequestProcessor {
             .ok_or_else(|| invalid_request(format!("thread not found: {thread_id}")))?;
         }
 
-        self.state_db
-            .clone()
-            .ok_or_else(|| internal_error("sqlite state db unavailable for thread goals"))
+        Ok(Some(self.state_db.clone().ok_or_else(|| {
+            internal_error("sqlite state db unavailable for thread goals")
+        })?))
     }
 
     async fn reconcile_thread_goal_rollout(
@@ -284,11 +342,11 @@ impl ThreadGoalRequestProcessor {
     }
 
     async fn emit_thread_goal_snapshot(&self, thread_id: ThreadId) {
-        let state_db = match self.state_db_for_materialized_thread(thread_id).await {
-            Ok(state_db) => state_db,
+        let resolved = match self.goal_store_for_thread(thread_id).await {
+            Ok(resolved) => resolved,
             Err(err) => {
-                warn!(
-                    "failed to open state db before emitting thread goal resume snapshot for {thread_id}: {}",
+                tracing::debug!(
+                    "failed to resolve goal store before emitting thread goal resume snapshot for {thread_id}: {}",
                     err.message
                 );
                 return;
@@ -301,7 +359,7 @@ impl ThreadGoalRequestProcessor {
         };
         if let Some(listener_command_tx) = listener_command_tx {
             let command = crate::thread_state::ThreadListenerCommand::EmitThreadGoalSnapshot {
-                state_db: state_db.clone(),
+                goal_store: Arc::clone(&resolved.goal_store),
             };
             if listener_command_tx.send(command).is_ok() {
                 return;
@@ -310,7 +368,12 @@ impl ThreadGoalRequestProcessor {
                 "failed to enqueue thread goal snapshot for {thread_id}: listener command channel is closed"
             );
         }
-        send_thread_goal_snapshot_notification(&self.outgoing, thread_id, &state_db).await;
+        send_thread_goal_snapshot_notification(
+            &self.outgoing,
+            thread_id,
+            resolved.goal_store.as_ref(),
+        )
+        .await;
     }
 
     async fn emit_thread_goal_updated_ordered(

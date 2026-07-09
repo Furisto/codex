@@ -31,6 +31,7 @@ use crate::spec::create_update_goal_tool;
 pub(crate) struct GoalToolExecutor {
     kind: GoalToolKind,
     thread_id: ThreadId,
+    goal_store: Arc<dyn codex_state::ThreadGoalStore>,
     state_db: Arc<codex_state::StateRuntime>,
     accounting_state: Arc<GoalAccountingState>,
     analytics: GoalAnalytics,
@@ -75,6 +76,7 @@ enum CompletionBudgetReport {
 impl GoalToolExecutor {
     pub(crate) fn get(
         thread_id: ThreadId,
+        goal_store: Arc<dyn codex_state::ThreadGoalStore>,
         state_db: Arc<codex_state::StateRuntime>,
         accounting_state: Arc<GoalAccountingState>,
         analytics: GoalAnalytics,
@@ -84,6 +86,7 @@ impl GoalToolExecutor {
         Self {
             kind: GoalToolKind::Get,
             thread_id,
+            goal_store,
             state_db,
             accounting_state,
             analytics,
@@ -94,6 +97,7 @@ impl GoalToolExecutor {
 
     pub(crate) fn create(
         thread_id: ThreadId,
+        goal_store: Arc<dyn codex_state::ThreadGoalStore>,
         state_db: Arc<codex_state::StateRuntime>,
         accounting_state: Arc<GoalAccountingState>,
         analytics: GoalAnalytics,
@@ -103,6 +107,7 @@ impl GoalToolExecutor {
         Self {
             kind: GoalToolKind::Create,
             thread_id,
+            goal_store,
             state_db,
             accounting_state,
             analytics,
@@ -113,6 +118,7 @@ impl GoalToolExecutor {
 
     pub(crate) fn update(
         thread_id: ThreadId,
+        goal_store: Arc<dyn codex_state::ThreadGoalStore>,
         state_db: Arc<codex_state::StateRuntime>,
         accounting_state: Arc<GoalAccountingState>,
         analytics: GoalAnalytics,
@@ -122,6 +128,7 @@ impl GoalToolExecutor {
         Self {
             kind: GoalToolKind::Update,
             thread_id,
+            goal_store,
             state_db,
             accounting_state,
             analytics,
@@ -166,8 +173,7 @@ impl GoalToolExecutor {
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let _ = invocation.function_arguments()?;
         let goal = self
-            .state_db
-            .thread_goals()
+            .goal_store
             .get_thread_goal(self.thread_id)
             .await
             .map(|goal| goal.map(protocol_goal_from_state))
@@ -188,11 +194,10 @@ impl GoalToolExecutor {
         validate_goal_budget(request.token_budget).map_err(FunctionCallError::RespondToModel)?;
 
         let goal = self
-            .state_db
-            .thread_goals()
+            .goal_store
             .insert_thread_goal(
                 self.thread_id,
-                request.objective.as_str(),
+                request.objective.clone(),
                 codex_state::ThreadGoalStatus::Active,
                 request.token_budget,
             )
@@ -250,8 +255,7 @@ impl GoalToolExecutor {
             .current_goal_status_for_metrics(/*expected_goal_id*/ None)
             .await?;
         let goal = self
-            .state_db
-            .thread_goals()
+            .goal_store
             .update_thread_goal(
                 self.thread_id,
                 codex_state::GoalUpdate {
@@ -325,14 +329,13 @@ impl GoalToolExecutor {
             .current_goal_status_for_metrics(Some(snapshot.expected_goal_id.as_str()))
             .await?;
         let outcome = self
-            .state_db
-            .thread_goals()
+            .goal_store
             .account_thread_goal_usage(
                 self.thread_id,
                 snapshot.time_delta_seconds,
                 snapshot.token_delta,
                 mode,
-                Some(snapshot.expected_goal_id.as_str()),
+                Some(snapshot.expected_goal_id.clone()),
             )
             .await
             .map_err(|err| {
@@ -372,8 +375,7 @@ impl GoalToolExecutor {
         expected_goal_id: Option<&str>,
     ) -> Result<Option<codex_state::ThreadGoalStatus>, FunctionCallError> {
         let goal = self
-            .state_db
-            .thread_goals()
+            .goal_store
             .get_thread_goal(self.thread_id)
             .await
             .map_err(|err| {

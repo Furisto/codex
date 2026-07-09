@@ -1,5 +1,7 @@
 use super::*;
 use crate::model::ThreadGoalRow;
+use std::future::Future;
+use std::pin::Pin;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -35,6 +37,159 @@ pub enum GoalAccountingMode {
     ActiveOnly,
     ActiveOrComplete,
     ActiveOrStopped,
+}
+
+/// Future returned by [`ThreadGoalStore`] operations.
+pub type ThreadGoalStoreFuture<'a, T> =
+    Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send + 'a>>;
+
+/// Durable storage for one thread's goal state.
+///
+/// Implementations must make writes durable before returning success and must
+/// apply `expected_goal_id` guards against the currently stored goal. Guarded
+/// updates return `Ok(None)` when the guard does not match.
+pub trait ThreadGoalStore: Send + Sync {
+    fn get_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+
+    fn replace_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: crate::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, crate::ThreadGoal>;
+
+    fn insert_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: crate::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+
+    fn update_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        update: GoalUpdate,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+
+    fn delete_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+
+    fn account_thread_goal_usage(
+        &self,
+        thread_id: ThreadId,
+        time_delta_seconds: i64,
+        token_delta: i64,
+        mode: GoalAccountingMode,
+        expected_goal_id: Option<String>,
+    ) -> ThreadGoalStoreFuture<'_, GoalAccountingOutcome>;
+
+    fn pause_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+
+    fn usage_limit_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>>;
+}
+
+impl ThreadGoalStore for GoalStore {
+    fn get_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move { GoalStore::get_thread_goal(self, thread_id).await })
+    }
+
+    fn replace_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: crate::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, crate::ThreadGoal> {
+        Box::pin(async move {
+            GoalStore::replace_thread_goal(
+                self,
+                thread_id,
+                objective.as_str(),
+                status,
+                token_budget,
+            )
+            .await
+        })
+    }
+
+    fn insert_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: crate::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move {
+            GoalStore::insert_thread_goal(self, thread_id, objective.as_str(), status, token_budget)
+                .await
+        })
+    }
+
+    fn update_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        update: GoalUpdate,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move { GoalStore::update_thread_goal(self, thread_id, update).await })
+    }
+
+    fn delete_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move { GoalStore::delete_thread_goal(self, thread_id).await })
+    }
+
+    fn account_thread_goal_usage(
+        &self,
+        thread_id: ThreadId,
+        time_delta_seconds: i64,
+        token_delta: i64,
+        mode: GoalAccountingMode,
+        expected_goal_id: Option<String>,
+    ) -> ThreadGoalStoreFuture<'_, GoalAccountingOutcome> {
+        Box::pin(async move {
+            GoalStore::account_thread_goal_usage(
+                self,
+                thread_id,
+                time_delta_seconds,
+                token_delta,
+                mode,
+                expected_goal_id.as_deref(),
+            )
+            .await
+        })
+    }
+
+    fn pause_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move { GoalStore::pause_active_thread_goal(self, thread_id).await })
+    }
+
+    fn usage_limit_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadGoalStoreFuture<'_, Option<crate::ThreadGoal>> {
+        Box::pin(async move { GoalStore::usage_limit_active_thread_goal(self, thread_id).await })
+    }
 }
 
 impl GoalStore {

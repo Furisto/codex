@@ -3,6 +3,7 @@ mod records;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::time::Instant;
 
 use aws_config::BehaviorVersion;
@@ -34,6 +35,7 @@ use records::COMMIT_PAYLOAD_SCHEMA;
 use records::COMMIT_SCHEMA;
 use records::CommitPayloadEnvelope;
 use records::CommitPointerRecord;
+use records::GOAL_SCHEMA;
 use records::HEAD_SCHEMA;
 use records::IDEMPOTENCY_SCHEMA;
 use records::IdempotencyRecord;
@@ -41,6 +43,7 @@ use records::SNAPSHOT_PAYLOAD_SCHEMA;
 use records::SequencedRolloutItem;
 use records::SnapshotPayloadEnvelope;
 use records::SnapshotPointerRecord;
+use records::ThreadGoalRecord;
 use records::ThreadHeadRecord;
 use records::ThreadMetadataRecord;
 
@@ -74,6 +77,7 @@ use crate::UpdateThreadMetadataParams;
 use crate::types::canonical_history_mode_from_rollout_items;
 
 const HEAD_SK: &str = "HEAD";
+const GOAL_SK: &str = "GOAL";
 const RECORD_JSON_ATTR: &str = "record_json";
 
 /// Optional controls for a lower-level AWS object-log append.
@@ -103,14 +107,14 @@ struct AwsObjectLogClients {
 #[derive(Debug)]
 pub struct AwsObjectLogThreadStore {
     config: AwsObjectLogThreadStoreConfig,
-    clients: OnceCell<AwsObjectLogClients>,
+    clients: Arc<OnceCell<AwsObjectLogClients>>,
 }
 
 impl AwsObjectLogThreadStore {
     pub fn new(config: AwsObjectLogThreadStoreConfig) -> Self {
         Self {
             config,
-            clients: OnceCell::new(),
+            clients: Arc::new(OnceCell::new()),
         }
     }
 
@@ -125,10 +129,9 @@ impl AwsObjectLogThreadStore {
         dynamodb: DynamoDbClient,
         s3: S3Client,
     ) -> Self {
-        let clients = OnceCell::new();
-        clients
-            .set(AwsObjectLogClients { dynamodb, s3 })
-            .expect("clients cell should be empty");
+        let clients = Arc::new(OnceCell::new());
+        let set_result = clients.set(AwsObjectLogClients { dynamodb, s3 });
+        debug_assert!(set_result.is_ok(), "clients cell should be empty");
         Self { config, clients }
     }
 
@@ -149,6 +152,13 @@ impl AwsObjectLogThreadStore {
                 })
             })
             .await
+    }
+
+    fn aws_goal_store(&self) -> AwsObjectLogGoalStore {
+        AwsObjectLogGoalStore {
+            config: self.config.clone(),
+            clients: Arc::clone(&self.clients),
+        }
     }
 
     pub async fn append_items_with_options(
@@ -1144,9 +1154,419 @@ impl AwsObjectLogThreadStore {
     }
 }
 
+#[derive(Debug)]
+struct AwsObjectLogGoalStore {
+    config: AwsObjectLogThreadStoreConfig,
+    clients: Arc<OnceCell<AwsObjectLogClients>>,
+}
+
+impl AwsObjectLogGoalStore {
+    async fn clients(&self) -> ThreadStoreResult<&AwsObjectLogClients> {
+        self.clients
+            .get_or_try_init(|| async {
+                let mut loader = aws_config::defaults(BehaviorVersion::latest());
+                if let Some(region) = self.config.aws_region.clone() {
+                    loader = loader.region(aws_config::Region::new(region));
+                }
+                if let Some(endpoint_url) = self.config.endpoint_url.clone() {
+                    loader = loader.endpoint_url(endpoint_url);
+                }
+                let sdk_config = loader.load().await;
+                Ok::<_, ThreadStoreError>(AwsObjectLogClients {
+                    dynamodb: DynamoDbClient::new(&sdk_config),
+                    s3: S3Client::new(&sdk_config),
+                })
+            })
+            .await
+    }
+
+    async fn aws_get_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadStoreResult<Option<codex_state::ThreadGoal>> {
+        let clients = self.clients().await?;
+        let output = clients
+            .dynamodb
+            .get_item()
+            .table_name(self.config.table_name.as_str())
+            .key("pk", av_s(thread_pk(&self.config, thread_id)))
+            .key("sk", av_s(GOAL_SK))
+            .consistent_read(true)
+            .send()
+            .await
+            .map_err(internal_aws_error(
+                "failed to read AWS object-log thread goal",
+            ))?;
+        output.item.map(|item| decode_goal_item(&item)).transpose()
+    }
+
+    async fn put_goal_record(
+        &self,
+        record: &ThreadGoalRecord,
+        condition_expression: Option<&str>,
+        expression_attribute_names: HashMap<String, String>,
+        expression_attribute_values: HashMap<String, AttributeValue>,
+    ) -> ThreadStoreResult<bool> {
+        let clients = self.clients().await?;
+        let mut put = clients
+            .dynamodb
+            .put_item()
+            .table_name(self.config.table_name.as_str())
+            .set_item(Some(goal_item(&self.config, record)?));
+        if let Some(condition_expression) = condition_expression {
+            put = put.condition_expression(condition_expression);
+        }
+        if !expression_attribute_names.is_empty() {
+            put = put.set_expression_attribute_names(Some(expression_attribute_names));
+        }
+        if !expression_attribute_values.is_empty() {
+            put = put.set_expression_attribute_values(Some(expression_attribute_values));
+        }
+        match put.send().await {
+            Ok(_) => Ok(true),
+            Err(err) if is_conditional_check_failed(&err) => Ok(false),
+            Err(err) => Err(internal_aws_error(
+                "failed to write AWS object-log thread goal",
+            )(err)),
+        }
+    }
+
+    async fn delete_goal_record(
+        &self,
+        thread_id: ThreadId,
+        expected_goal_id: &str,
+    ) -> ThreadStoreResult<bool> {
+        let clients = self.clients().await?;
+        match clients
+            .dynamodb
+            .delete_item()
+            .table_name(self.config.table_name.as_str())
+            .key("pk", av_s(thread_pk(&self.config, thread_id)))
+            .key("sk", av_s(GOAL_SK))
+            .condition_expression("goal_id = :goal_id")
+            .expression_attribute_values(":goal_id", av_s(expected_goal_id))
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(err) if is_conditional_check_failed(&err) => Ok(false),
+            Err(err) => Err(internal_aws_error(
+                "failed to delete AWS object-log thread goal",
+            )(err)),
+        }
+    }
+
+    fn new_goal_record(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: codex_state::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalRecord {
+        let now_ms = Utc::now().timestamp_millis();
+        let status = status_after_budget_limit(status, /*tokens_used*/ 0, token_budget);
+        ThreadGoalRecord {
+            schema: GOAL_SCHEMA.to_string(),
+            namespace: self.config.namespace.clone(),
+            thread_id,
+            goal_id: ThreadId::new().to_string(),
+            objective,
+            status,
+            token_budget,
+            tokens_used: 0,
+            time_used_seconds: 0,
+            created_at_ms: now_ms,
+            updated_at_ms: now_ms,
+        }
+    }
+}
+
+impl codex_state::ThreadGoalStore for AwsObjectLogGoalStore {
+    fn get_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            self.aws_get_thread_goal(thread_id)
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn replace_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: codex_state::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, codex_state::ThreadGoal> {
+        Box::pin(async move {
+            let record = self.new_goal_record(thread_id, objective, status, token_budget);
+            self.put_goal_record(
+                &record,
+                /*condition_expression*/ None,
+                HashMap::new(),
+                HashMap::new(),
+            )
+            .await?;
+            thread_goal_from_record(record).map_err(Into::into)
+        })
+    }
+
+    fn insert_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: codex_state::ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            let existing = self.aws_get_thread_goal(thread_id).await?;
+            let condition = match existing.as_ref() {
+                Some(goal) if goal.status == codex_state::ThreadGoalStatus::Complete => {
+                    "goal_id = :current_goal_id AND #status = :complete"
+                }
+                Some(_) => return Ok(None),
+                None => "attribute_not_exists(pk)",
+            };
+            let mut names = HashMap::new();
+            let mut values = HashMap::new();
+            if let Some(goal) = existing.as_ref() {
+                names.insert("#status".to_string(), "status".to_string());
+                values.insert(":current_goal_id".to_string(), av_s(goal.goal_id.clone()));
+                values.insert(
+                    ":complete".to_string(),
+                    av_s(codex_state::ThreadGoalStatus::Complete.as_str()),
+                );
+            }
+            let record = self.new_goal_record(thread_id, objective, status, token_budget);
+            if !self
+                .put_goal_record(&record, Some(condition), names, values)
+                .await?
+            {
+                return Ok(None);
+            }
+            thread_goal_from_record(record)
+                .map(Some)
+                .map_err(Into::into)
+        })
+    }
+
+    fn update_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        update: codex_state::GoalUpdate,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            let Some(existing) = self.aws_get_thread_goal(thread_id).await? else {
+                return Ok(None);
+            };
+            if update
+                .expected_goal_id
+                .as_ref()
+                .is_some_and(|expected_goal_id| *expected_goal_id != existing.goal_id)
+            {
+                return Ok(None);
+            }
+            if update.objective.is_none()
+                && update.status.is_none()
+                && update.token_budget.is_none()
+            {
+                return Ok(Some(existing));
+            }
+            let record = apply_goal_update(existing, update, self.config.namespace.clone());
+            let mut values = HashMap::new();
+            values.insert(":goal_id".to_string(), av_s(record.goal_id.clone()));
+            if !self
+                .put_goal_record(&record, Some("goal_id = :goal_id"), HashMap::new(), values)
+                .await?
+            {
+                return Ok(None);
+            }
+            thread_goal_from_record(record)
+                .map(Some)
+                .map_err(Into::into)
+        })
+    }
+
+    fn delete_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            let Some(existing) = self.aws_get_thread_goal(thread_id).await? else {
+                return Ok(None);
+            };
+            if !self
+                .delete_goal_record(thread_id, existing.goal_id.as_str())
+                .await?
+            {
+                return Ok(None);
+            }
+            Ok(Some(existing))
+        })
+    }
+
+    fn account_thread_goal_usage(
+        &self,
+        thread_id: ThreadId,
+        time_delta_seconds: i64,
+        token_delta: i64,
+        mode: codex_state::GoalAccountingMode,
+        expected_goal_id: Option<String>,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, codex_state::GoalAccountingOutcome> {
+        Box::pin(async move {
+            let time_delta_seconds = time_delta_seconds.max(0);
+            let token_delta = token_delta.max(0);
+            let existing = self.aws_get_thread_goal(thread_id).await?;
+            if time_delta_seconds == 0 && token_delta == 0 {
+                return Ok(codex_state::GoalAccountingOutcome::Unchanged(existing));
+            }
+            let Some(existing) = existing else {
+                return Ok(codex_state::GoalAccountingOutcome::Unchanged(None));
+            };
+            if expected_goal_id
+                .as_ref()
+                .is_some_and(|expected_goal_id| *expected_goal_id != existing.goal_id)
+                || !goal_accounting_status_matches(existing.status, mode)
+            {
+                return Ok(codex_state::GoalAccountingOutcome::Unchanged(Some(
+                    existing,
+                )));
+            }
+
+            let mut record =
+                goal_record_from_thread_goal(existing.clone(), self.config.namespace.clone());
+            record.time_used_seconds += time_delta_seconds;
+            record.tokens_used += token_delta;
+            if goal_accounting_budget_limit_status_matches(record.status, mode)
+                && record
+                    .token_budget
+                    .is_some_and(|budget| record.tokens_used >= budget)
+            {
+                record.status = codex_state::ThreadGoalStatus::BudgetLimited;
+            }
+            record.updated_at_ms = Utc::now().timestamp_millis();
+
+            let mut names = HashMap::new();
+            names.insert("#status".to_string(), "status".to_string());
+            let mut values = HashMap::new();
+            values.insert(":goal_id".to_string(), av_s(record.goal_id.clone()));
+            add_status_condition_values(&mut values, ":status", goal_accounting_statuses(mode));
+            let condition = format!(
+                "goal_id = :goal_id AND #status IN ({})",
+                status_condition_placeholders(":status", goal_accounting_statuses(mode).len())
+            );
+            if !self
+                .put_goal_record(&record, Some(condition.as_str()), names, values)
+                .await?
+            {
+                return Ok(codex_state::GoalAccountingOutcome::Unchanged(
+                    self.aws_get_thread_goal(thread_id).await?,
+                ));
+            }
+            thread_goal_from_record(record)
+                .map(codex_state::GoalAccountingOutcome::Updated)
+                .map_err(Into::into)
+        })
+    }
+
+    fn pause_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            self.update_active_thread_goal_status(thread_id, codex_state::ThreadGoalStatus::Paused)
+                .await
+                .map_err(Into::into)
+        })
+    }
+
+    fn usage_limit_active_thread_goal(
+        &self,
+        thread_id: ThreadId,
+    ) -> codex_state::ThreadGoalStoreFuture<'_, Option<codex_state::ThreadGoal>> {
+        Box::pin(async move {
+            self.update_active_thread_goal_status(
+                thread_id,
+                codex_state::ThreadGoalStatus::UsageLimited,
+            )
+            .await
+            .map_err(Into::into)
+        })
+    }
+}
+
+impl AwsObjectLogGoalStore {
+    async fn update_active_thread_goal_status(
+        &self,
+        thread_id: ThreadId,
+        status: codex_state::ThreadGoalStatus,
+    ) -> ThreadStoreResult<Option<codex_state::ThreadGoal>> {
+        let Some(existing) = self.aws_get_thread_goal(thread_id).await? else {
+            return Ok(None);
+        };
+        let should_update = match status {
+            codex_state::ThreadGoalStatus::UsageLimited => {
+                matches!(
+                    existing.status,
+                    codex_state::ThreadGoalStatus::Active
+                        | codex_state::ThreadGoalStatus::BudgetLimited
+                )
+            }
+            codex_state::ThreadGoalStatus::Paused => {
+                existing.status == codex_state::ThreadGoalStatus::Active
+            }
+            codex_state::ThreadGoalStatus::Active
+            | codex_state::ThreadGoalStatus::Blocked
+            | codex_state::ThreadGoalStatus::BudgetLimited
+            | codex_state::ThreadGoalStatus::Complete => false,
+        };
+        if !should_update {
+            return Ok(None);
+        }
+
+        let mut record = goal_record_from_thread_goal(existing, self.config.namespace.clone());
+        record.status = status;
+        record.updated_at_ms = Utc::now().timestamp_millis();
+
+        let mut names = HashMap::new();
+        names.insert("#status".to_string(), "status".to_string());
+        let mut values = HashMap::new();
+        values.insert(":goal_id".to_string(), av_s(record.goal_id.clone()));
+        let statuses = match status {
+            codex_state::ThreadGoalStatus::UsageLimited => &[
+                codex_state::ThreadGoalStatus::Active,
+                codex_state::ThreadGoalStatus::BudgetLimited,
+            ][..],
+            codex_state::ThreadGoalStatus::Paused => &[codex_state::ThreadGoalStatus::Active][..],
+            codex_state::ThreadGoalStatus::Active
+            | codex_state::ThreadGoalStatus::Blocked
+            | codex_state::ThreadGoalStatus::BudgetLimited
+            | codex_state::ThreadGoalStatus::Complete => &[][..],
+        };
+        add_status_condition_values(&mut values, ":status", statuses);
+        let condition = format!(
+            "goal_id = :goal_id AND #status IN ({})",
+            status_condition_placeholders(":status", statuses.len())
+        );
+        if !self
+            .put_goal_record(&record, Some(condition.as_str()), names, values)
+            .await?
+        {
+            return Ok(None);
+        }
+        thread_goal_from_record(record).map(Some)
+    }
+}
+
 impl ThreadStore for AwsObjectLogThreadStore {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn goal_store(&self) -> Option<Arc<dyn codex_state::ThreadGoalStore>> {
+        Some(Arc::new(self.aws_goal_store()))
     }
 
     fn create_thread(&self, params: CreateThreadParams) -> ThreadStoreFuture<'_, ()> {
@@ -1370,6 +1790,34 @@ fn idempotency_item(
     ]))
 }
 
+fn goal_item(
+    config: &AwsObjectLogThreadStoreConfig,
+    record: &ThreadGoalRecord,
+) -> ThreadStoreResult<HashMap<String, AttributeValue>> {
+    let mut item = HashMap::from([
+        ("pk".to_string(), av_s(thread_pk(config, record.thread_id))),
+        ("sk".to_string(), av_s(GOAL_SK)),
+        ("record_type".to_string(), av_s("GOAL")),
+        (RECORD_JSON_ATTR.to_string(), av_s(json_string(record)?)),
+        ("namespace".to_string(), av_s(config.namespace.clone())),
+        ("thread_id".to_string(), av_s(record.thread_id.to_string())),
+        ("goal_id".to_string(), av_s(record.goal_id.clone())),
+        ("objective".to_string(), av_s(record.objective.clone())),
+        ("status".to_string(), av_s(record.status.as_str())),
+        ("tokens_used".to_string(), av_i64(record.tokens_used)),
+        (
+            "time_used_seconds".to_string(),
+            av_i64(record.time_used_seconds),
+        ),
+        ("created_at_ms".to_string(), av_i64(record.created_at_ms)),
+        ("updated_at_ms".to_string(), av_i64(record.updated_at_ms)),
+    ]);
+    if let Some(token_budget) = record.token_budget {
+        item.insert("token_budget".to_string(), av_i64(token_budget));
+    }
+    Ok(item)
+}
+
 fn put_item_tx(
     table_name: &str,
     item: HashMap<String, AttributeValue>,
@@ -1399,6 +1847,18 @@ fn decode_head_item(item: &HashMap<String, AttributeValue>) -> ThreadStoreResult
     Ok(head)
 }
 
+fn decode_goal_item(
+    item: &HashMap<String, AttributeValue>,
+) -> ThreadStoreResult<codex_state::ThreadGoal> {
+    let record: ThreadGoalRecord = decode_record(item, "thread goal")?;
+    if record.schema != GOAL_SCHEMA {
+        return Err(ThreadStoreError::Internal {
+            message: format!("unsupported thread goal schema {}", record.schema),
+        });
+    }
+    thread_goal_from_record(record)
+}
+
 fn decode_record<T: serde::de::DeserializeOwned>(
     item: &HashMap<String, AttributeValue>,
     record_name: &str,
@@ -1415,6 +1875,96 @@ fn decode_record<T: serde::de::DeserializeOwned>(
     serde_json::from_str(json).map_err(|err| ThreadStoreError::Internal {
         message: format!("failed to decode {record_name} record JSON: {err}"),
     })
+}
+
+fn thread_goal_from_record(record: ThreadGoalRecord) -> ThreadStoreResult<codex_state::ThreadGoal> {
+    let created_at =
+        DateTime::<Utc>::from_timestamp_millis(record.created_at_ms).ok_or_else(|| {
+            ThreadStoreError::Internal {
+                message: format!("invalid thread goal created_at_ms {}", record.created_at_ms),
+            }
+        })?;
+    let updated_at =
+        DateTime::<Utc>::from_timestamp_millis(record.updated_at_ms).ok_or_else(|| {
+            ThreadStoreError::Internal {
+                message: format!("invalid thread goal updated_at_ms {}", record.updated_at_ms),
+            }
+        })?;
+    Ok(codex_state::ThreadGoal {
+        thread_id: record.thread_id,
+        goal_id: record.goal_id,
+        objective: record.objective,
+        status: record.status,
+        token_budget: record.token_budget,
+        tokens_used: record.tokens_used,
+        time_used_seconds: record.time_used_seconds,
+        created_at,
+        updated_at,
+    })
+}
+
+fn goal_record_from_thread_goal(
+    goal: codex_state::ThreadGoal,
+    namespace: String,
+) -> ThreadGoalRecord {
+    ThreadGoalRecord {
+        schema: GOAL_SCHEMA.to_string(),
+        namespace,
+        thread_id: goal.thread_id,
+        goal_id: goal.goal_id,
+        objective: goal.objective,
+        status: goal.status,
+        token_budget: goal.token_budget,
+        tokens_used: goal.tokens_used,
+        time_used_seconds: goal.time_used_seconds,
+        created_at_ms: goal.created_at.timestamp_millis(),
+        updated_at_ms: goal.updated_at.timestamp_millis(),
+    }
+}
+
+fn apply_goal_update(
+    goal: codex_state::ThreadGoal,
+    update: codex_state::GoalUpdate,
+    namespace: String,
+) -> ThreadGoalRecord {
+    let codex_state::GoalUpdate {
+        objective,
+        status,
+        token_budget,
+        expected_goal_id: _,
+    } = update;
+    let mut record = ThreadGoalRecord {
+        schema: GOAL_SCHEMA.to_string(),
+        namespace,
+        thread_id: goal.thread_id,
+        goal_id: goal.goal_id,
+        objective: objective.unwrap_or(goal.objective),
+        status: goal.status,
+        token_budget: goal.token_budget,
+        tokens_used: goal.tokens_used,
+        time_used_seconds: goal.time_used_seconds,
+        created_at_ms: goal.created_at.timestamp_millis(),
+        updated_at_ms: Utc::now().timestamp_millis(),
+    };
+    if let Some(token_budget) = token_budget {
+        record.token_budget = token_budget;
+    }
+    if let Some(status) = status {
+        record.status = goal_update_status_after_budget_limit(
+            goal.status,
+            status,
+            record.tokens_used,
+            record.token_budget,
+        );
+    } else if token_budget.is_some()
+        && record.status == codex_state::ThreadGoalStatus::Active
+        && record
+            .token_budget
+            .is_some_and(|budget| record.tokens_used >= budget)
+    {
+        record.status = codex_state::ThreadGoalStatus::BudgetLimited;
+    }
+    record
 }
 
 fn stored_thread_from_head_record(
@@ -1620,6 +2170,110 @@ fn idempotency_sk(idempotency_key: &str) -> String {
     format!("IDEMP#APPEND#{idempotency_key}")
 }
 
+fn status_after_budget_limit(
+    status: codex_state::ThreadGoalStatus,
+    tokens_used: i64,
+    token_budget: Option<i64>,
+) -> codex_state::ThreadGoalStatus {
+    if status == codex_state::ThreadGoalStatus::Active
+        && token_budget.is_some_and(|budget| tokens_used >= budget)
+    {
+        codex_state::ThreadGoalStatus::BudgetLimited
+    } else {
+        status
+    }
+}
+
+fn goal_update_status_after_budget_limit(
+    current_status: codex_state::ThreadGoalStatus,
+    requested_status: codex_state::ThreadGoalStatus,
+    tokens_used: i64,
+    token_budget: Option<i64>,
+) -> codex_state::ThreadGoalStatus {
+    if current_status == codex_state::ThreadGoalStatus::BudgetLimited
+        && matches!(
+            requested_status,
+            codex_state::ThreadGoalStatus::Paused | codex_state::ThreadGoalStatus::Blocked
+        )
+    {
+        return current_status;
+    }
+    status_after_budget_limit(requested_status, tokens_used, token_budget)
+}
+
+fn goal_accounting_statuses(
+    mode: codex_state::GoalAccountingMode,
+) -> &'static [codex_state::ThreadGoalStatus] {
+    match mode {
+        codex_state::GoalAccountingMode::ActiveStatusOnly => {
+            &[codex_state::ThreadGoalStatus::Active]
+        }
+        codex_state::GoalAccountingMode::ActiveOnly => &[
+            codex_state::ThreadGoalStatus::Active,
+            codex_state::ThreadGoalStatus::BudgetLimited,
+        ],
+        codex_state::GoalAccountingMode::ActiveOrComplete => &[
+            codex_state::ThreadGoalStatus::Active,
+            codex_state::ThreadGoalStatus::BudgetLimited,
+            codex_state::ThreadGoalStatus::Complete,
+        ],
+        codex_state::GoalAccountingMode::ActiveOrStopped => &[
+            codex_state::ThreadGoalStatus::Active,
+            codex_state::ThreadGoalStatus::Paused,
+            codex_state::ThreadGoalStatus::Blocked,
+            codex_state::ThreadGoalStatus::UsageLimited,
+            codex_state::ThreadGoalStatus::BudgetLimited,
+        ],
+    }
+}
+
+fn goal_accounting_budget_limit_status_matches(
+    status: codex_state::ThreadGoalStatus,
+    mode: codex_state::GoalAccountingMode,
+) -> bool {
+    match mode {
+        codex_state::GoalAccountingMode::ActiveStatusOnly
+        | codex_state::GoalAccountingMode::ActiveOnly
+        | codex_state::GoalAccountingMode::ActiveOrComplete => {
+            status == codex_state::ThreadGoalStatus::Active
+        }
+        codex_state::GoalAccountingMode::ActiveOrStopped => {
+            matches!(
+                status,
+                codex_state::ThreadGoalStatus::Active
+                    | codex_state::ThreadGoalStatus::Paused
+                    | codex_state::ThreadGoalStatus::Blocked
+                    | codex_state::ThreadGoalStatus::UsageLimited
+                    | codex_state::ThreadGoalStatus::BudgetLimited
+            )
+        }
+    }
+}
+
+fn goal_accounting_status_matches(
+    status: codex_state::ThreadGoalStatus,
+    mode: codex_state::GoalAccountingMode,
+) -> bool {
+    goal_accounting_statuses(mode).contains(&status)
+}
+
+fn add_status_condition_values(
+    values: &mut HashMap<String, AttributeValue>,
+    prefix: &str,
+    statuses: &[codex_state::ThreadGoalStatus],
+) {
+    for (index, status) in statuses.iter().enumerate() {
+        values.insert(format!("{prefix}{index}"), av_s(status.as_str()));
+    }
+}
+
+fn status_condition_placeholders(prefix: &str, count: usize) -> String {
+    (0..count)
+        .map(|index| format!("{prefix}{index}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn stable_commit_id(start_seq: u64, end_seq: u64, idempotency_key: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(idempotency_key.as_bytes());
@@ -1659,6 +2313,10 @@ fn av_s(value: impl Into<String>) -> AttributeValue {
 }
 
 fn av_n(value: u64) -> AttributeValue {
+    AttributeValue::N(value.to_string())
+}
+
+fn av_i64(value: i64) -> AttributeValue {
     AttributeValue::N(value.to_string())
 }
 
@@ -1707,6 +2365,10 @@ fn internal_aws_error<E: Debug>(context: &'static str) -> impl FnOnce(E) -> Thre
     move |err| ThreadStoreError::Internal {
         message: format!("{context}: {}", sanitized_aws_error(err)),
     }
+}
+
+fn is_conditional_check_failed<E: Debug>(err: &E) -> bool {
+    format!("{err:?}").contains("ConditionalCheckFailed")
 }
 
 fn sanitized_aws_error<E: Debug>(err: E) -> String {

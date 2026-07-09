@@ -1,739 +1,505 @@
-# Durable AWS Object-Log ThreadStore Spec
+# Backend-Neutral Durable Goal Store Spec
 
 ## Objective
 
-Replace the current in-memory `AwsObjectLogThreadStore` prototype with a real durable DynamoDB + S3 implementation.
+Make thread goals durable through a backend-neutral storage contract instead of requiring a local rollout path and local SQLite state DB.
 
-The finished backend must allow a Codex process to die, lose all local process state, and be replaced by another Codex process on another machine that can resume the thread using only AWS-backed ThreadStore state.
+The immediate bug this fixes is that AWS Object Log threads are persistent and resumable through `ThreadStore`, but `thread/goal/get`, `thread/goal/set`, `thread/goal/clear`, and resume goal snapshot emission still assume every persisted thread has a local `rollout_path()` and local `StateDbHandle`.
 
-The existing in-memory object-log behavior is not an acceptable production implementation. It may be retained only as a test fake or removed entirely.
+The finished design must let a non-local ThreadStore backend, specifically AWS Object Log, support durable goals without fabricating a local rollout JSONL path.
 
 ## Current Problem
 
-`codex-rs/thread-store/src/remote/aws_object_log.rs` currently models the intended object-log data structures in memory:
+Current app-server goal handling is local-storage coupled:
 
-- Thread heads are stored in `HashMap<ThreadId, AwsObjectLogThreadHead>`.
-- Commit pointers are stored in `HashMap<ThreadId, BTreeMap<u64, AwsObjectLogCommitPointer>>`.
-- Idempotency records are stored in `HashMap<AwsObjectLogIdempotencyScope, AwsObjectLogIdempotencyRecord>`.
-- Payload objects are stored in `HashMap<String, AwsObjectLogCommitPayload>`.
-- All state is protected by one `tokio::sync::Mutex`.
+- `ThreadGoalRequestProcessor::state_db_for_materialized_thread` rejects running threads with `thread.rollout_path().is_none()`.
+- `thread_goal_set_inner` and `thread_goal_clear_inner` call `reconcile_thread_goal_rollout`, which finds and scans a local rollout JSONL file before writing goal state.
+- `GoalService` takes `&codex_state::StateRuntime` and writes through `state_db.thread_goals()`.
+- `ThreadListenerCommand::EmitThreadGoalSnapshot` carries a `StateDbHandle`, so ordered resume snapshots are also SQLite-specific.
+- AWS Object Log stores rollout items remotely, but no local rollout JSONL file exists for resumed AWS threads.
 
-That implementation validates some protocol semantics, but it is not durable and cannot satisfy remote resume after process or machine loss. The implementation work must replace those maps with real AWS calls.
+This means AWS-backed threads can be durable from the ThreadStore perspective while goal APIs still fail as if the thread were ephemeral or pathless.
 
 ## Requirements
 
 ### Functional Requirements
 
-1. Persist thread creation durably in DynamoDB.
-2. Persist each append batch durably as:
-   - an immutable S3 payload object containing serialized rollout items
-   - a DynamoDB commit pointer that makes the S3 object part of committed history
-   - a DynamoDB idempotency record for retry-safe replay
-   - a DynamoDB head update advancing the committed sequence
-3. Persist `StoredThreadConfigSnapshot` on the DynamoDB `HEAD` item during thread creation.
-4. Read `StoredThread.config_snapshot` from DynamoDB `HEAD` during `read_thread`.
-5. Load committed history by reading DynamoDB commit pointers and then fetching referenced S3 payloads.
-6. Support `read_thread(include_history=true)` and `load_history` without using local rollout files.
-7. Support `list_threads` and `search_threads` from DynamoDB metadata projections.
-8. Support archive, unarchive, delete, and metadata updates through DynamoDB.
-9. Preserve local ThreadStore compatibility for existing local JSONL + SQLite history.
-10. Support import from existing rollout history into DynamoDB + S3.
-11. Keep customer-account deployment lightweight: one DynamoDB table, one S3 bucket, IAM policy, optional KMS keys, optional lifecycle policy.
+1. Keep the existing app-server goal RPC surface:
+   - `thread/goal/get`
+   - `thread/goal/set`
+   - `thread/goal/clear`
+   - `threadGoalUpdated` notifications
+   - `threadGoalCleared` notifications
+2. Introduce a backend-neutral durable goal storage contract.
+3. Preserve the current local behavior by implementing that contract for the existing SQLite-backed `codex_state::GoalStore`.
+4. Implement the same contract for AWS Object Log backed threads.
+5. Stop requiring `rollout_path()` for goal get/set/clear/snapshot on stores that support durable goals.
+6. Preserve current goal semantics:
+   - one active goal row per thread
+   - goal replacement creates a new `goal_id`
+   - expected-goal-id compare-and-update behavior
+   - status transitions for active, paused, blocked, usage-limited, budget-limited, complete
+   - token and time accounting
+   - budget-limit promotion when usage reaches budget
+7. Preserve live runtime ordering:
+   - external goal mutations must not race idle goal continuation logic
+   - goal update and clear notifications must stay ordered with running-thread resume responses
+8. Preserve local rollout metadata compatibility:
+   - local goal updates should still append `EventMsg::ThreadGoalUpdated` where needed so local thread list/search previews continue to work
+   - remote implementations should not need a local rollout append for goal correctness
+9. Avoid slow failing startup probes:
+   - if a backend does not support durable goals, return an explicit unsupported/capability result quickly
+   - TUI resume should not block first-frame rendering on an expected unsupported goal probe
+10. Do not create a remote `rollout_path` abstraction.
 
 ### Correctness Requirements
 
-1. DynamoDB is the source of truth for committed sequence order.
-2. S3 objects are never considered committed until referenced by a committed DynamoDB item.
-3. Readers must never discover history by listing S3.
-4. Append retry with the same idempotency key and same request hash returns the original commit result.
-5. Append retry with the same idempotency key and different request hash fails with an idempotency conflict.
-6. If the network times out after DynamoDB commit but before response, retry must recover by reading the idempotency record.
-7. If S3 PUT succeeds but DynamoDB commit fails, the orphan S3 object must be ignored and later cleaned up.
-8. If the writer dies mid-append before DynamoDB commit, replacement resume must observe only previously committed history.
-9. If another writer concurrently appends despite the external single-active guarantee, DynamoDB sequence conditions must fail closed.
-10. Metadata projection must not advance beyond committed history for append-derived updates.
+1. For a given thread, goal writes must be durable before the RPC response is sent.
+2. A read after a successful set/clear must observe the new state when reading by thread id from the same backend.
+3. Concurrent updates with stale `expected_goal_id` must fail or return no update, matching existing SQLite semantics.
+4. Accounting updates must be atomic with respect to goal status and usage counters.
+5. A failed goal write must not emit goal update/clear notifications.
+6. A live thread whose goal is modified externally must update its in-memory runtime effects after durable write success.
+7. Local goal reconciliation from historical rollout JSONL remains available for local threads, but remote goal reads must not scan or materialize local rollout files.
+8. AWS goal state must survive app-server process loss and machine loss.
 
-### Non-Requirements For The First Durable Version
+### Non-Requirements
 
-1. Codex-managed leases or fencing. Single-active ownership is handled externally.
-2. Multi-region active/active writes.
-3. Full-text search over all rollout payload content.
-4. A hosted ThreadStore control plane.
-5. Per-method `tenant_id`, `user_id`, `writer_id`, or lease-token parameters. Namespace and authorization scope are configured when constructing the store.
+1. Do not migrate every historical local rollout's goal state eagerly.
+2. Do not make AWS Object Log produce local rollout JSONL files.
+3. Do not change the public app-server v2 goal API unless a later compatibility review explicitly approves it.
+4. Do not require a new AWS table in the first implementation if the existing `codex-threads` table can store goal items safely.
+5. Do not make goals available on stores that cannot provide durable compare-and-update semantics.
 
 ## Constraints
 
-1. Do not keep the production `AwsObjectLogThreadStore` backed by `HashMap` state.
-2. Do not call this backend durable until it uses real DynamoDB and S3 clients.
-3. Keep `codex-thread-store` independent from `codex-core`.
-4. Store config snapshot DTOs in `codex-thread-store` using storage-neutral types.
-5. Use explicit serialization formats and schema versions for every DynamoDB and S3 record.
-6. Do not store secrets, auth tokens, live handles, process ids, or machine-local runtime handles.
-7. Large rollout payloads must go to S3, not DynamoDB.
-8. DynamoDB item size must stay below 400 KB.
-9. DynamoDB transaction size must stay within AWS transaction limits.
-10. S3 object keys must be deterministic enough to support safe retry cleanup and debugging.
-11. The implementation must compile and test without requiring real AWS credentials for unit tests.
-12. Integration tests must be able to run against AWS-compatible local endpoints or a real test AWS account when configured.
+1. Keep app-server logic storage-neutral. It may depend on a goal-store trait, not on `StateDbHandle` or local rollout paths for the common path.
+2. Keep local SQLite as the compatibility implementation.
+3. Do not add a trait with `async fn` unless it uses an explicit object-safe boxed future shape. Follow the repository guidance against `async_trait`.
+4. Keep new public trait API documented.
+5. Prefer storing the trait and shared goal model in `codex-state`, because:
+   - `codex-state` already owns `ThreadGoal`, `GoalUpdate`, and accounting semantics
+   - `codex-goal-extension` already depends on `codex-state`
+   - `codex-thread-store` already depends on `codex-state`
+6. Do not make `codex-state` depend on `codex-thread-store` or app-server.
+7. AWS goal writes must use conditional writes or transactions, not read-modify-write without compare conditions.
+8. AWS goal records must use explicit schema versions.
+9. Tests must not require real AWS credentials for routine local runs.
 
 ## Architecture
 
-### Module Layout
-
-Create a real remote implementation under `codex-rs/thread-store/src/remote/aws_object_log/`:
+### High-Level Shape
 
 ```text
-remote/aws_object_log/
-  mod.rs
-  config.rs
-  dynamodb.rs
-  s3.rs
-  records.rs
-  serialization.rs
-  append.rs
-  read.rs
-  metadata.rs
-  import.rs
-  tests.rs
+app-server goal RPCs
+  -> GoalService
+      -> dyn ThreadGoalStore
+          local: SQLite GoalStore
+          aws: DynamoDB-backed goal store
+
+ThreadStore
+  remains responsible for thread history, metadata, list/read/resume/fork
+
+rollout JSONL
+  remains local ThreadStore durable history format
+  is not the universal goal storage mechanism
 ```
 
-The public exports remain:
+The key architectural change is that goal operations receive a `ThreadGoalStore` handle selected for the target thread, not a `StateDbHandle`.
 
-- `AwsObjectLogThreadStore`
-- `AwsObjectLogThreadStoreConfig`
-- `AwsObjectLogAppendOptions`
-- `AwsObjectLogAppendResult`
+### New Storage Trait
 
-The current single-file in-memory implementation should be replaced. If a fake remains useful, move it under tests and name it explicitly as a fake, for example `FakeAwsObjectLogBackend`.
+Add an object-safe trait in `codex-state`, likely next to `runtime/goals.rs`.
 
-### Dependencies
-
-Add AWS SDK dependencies to `codex-thread-store`:
-
-- `aws-config`
-- `aws-sdk-dynamodb`
-- `aws-sdk-s3`
-- `aws-smithy-types` if needed for byte streams and retries
-- compression crate only if existing workspace dependencies do not already provide one
-- hashing crate if existing workspace dependencies do not already provide SHA-256
-
-After dependency changes:
-
-1. Update `codex-rs/Cargo.lock`.
-2. Run `just bazel-lock-update` from the repo root if Bazel is available.
-3. If Bazel is unavailable locally, document that `MODULE.bazel.lock` could not be refreshed and must be updated by CI or a Bazel-capable environment.
-
-### Configuration
-
-`AwsObjectLogThreadStoreConfig` should contain:
+Suggested shape:
 
 ```rust
-pub struct AwsObjectLogThreadStoreConfig {
-    pub table_name: String,
-    pub bucket_name: String,
-    pub namespace: String,
-    pub key_prefix: String,
-    pub aws_region: Option<String>,
-    pub endpoint_url: Option<String>,
-    pub kms_key_id: Option<String>,
-    pub consistent_reads: bool,
-    pub append_payload_compression: AwsObjectLogCompression,
+pub type ThreadGoalStoreFuture<'a, T> =
+    Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send + 'a>>;
+
+/// Durable storage for one thread's goal state.
+///
+/// Implementations must provide atomic per-thread updates. `expected_goal_id`
+/// guards must compare against the currently stored goal id and return `None`
+/// when the guard does not match.
+pub trait ThreadGoalStore: Send + Sync {
+    fn get_thread_goal(&self, thread_id: ThreadId)
+        -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
+
+    fn replace_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, ThreadGoal>;
+
+    fn insert_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        objective: String,
+        status: ThreadGoalStatus,
+        token_budget: Option<i64>,
+    ) -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
+
+    fn update_thread_goal(
+        &self,
+        thread_id: ThreadId,
+        update: GoalUpdate,
+    ) -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
+
+    fn delete_thread_goal(&self, thread_id: ThreadId)
+        -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
+
+    fn account_thread_goal_usage(
+        &self,
+        thread_id: ThreadId,
+        time_delta_seconds: i64,
+        token_delta: i64,
+        mode: GoalAccountingMode,
+        expected_goal_id: Option<String>,
+    ) -> ThreadGoalStoreFuture<'_, GoalAccountingOutcome>;
+
+    fn pause_active_thread_goal(&self, thread_id: ThreadId)
+        -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
+
+    fn usage_limit_active_thread_goal(&self, thread_id: ThreadId)
+        -> ThreadGoalStoreFuture<'_, Option<ThreadGoal>>;
 }
 ```
 
-Configuration is supplied at store construction, not on every ThreadStore method call.
+Implementation notes:
 
-Assumption for the first customer-account deployment: `namespace` is a deployment-local logical namespace, not a multi-tenant SaaS tenant id. It protects key layout and IAM scoping without making app-server multi-tenant.
+- The exact method signatures may use owned `String` values to avoid borrowed data crossing boxed futures.
+- `GoalUpdate.expected_goal_id` should become owned if needed for object-safe async boundaries.
+- Existing `codex_state::GoalStore` should implement this trait and keep its SQL behavior unchanged.
+- Existing direct methods on `GoalStore` can remain as convenience methods if they delegate through shared private helpers.
 
-### AWS Client Construction
+### GoalService Changes
 
-`AwsObjectLogThreadStore::new` should remain cheap and deterministic where possible.
-
-Recommended constructors:
+Change `codex-goal-extension::GoalService` from:
 
 ```rust
-impl AwsObjectLogThreadStore {
-    pub async fn from_config(config: AwsObjectLogThreadStoreConfig) -> ThreadStoreResult<Self>;
+fn get_thread_goal(&self, state_db: &StateRuntime, thread_id: ThreadId)
+fn set_thread_goal(&self, state_db: &StateRuntime, request: GoalSetRequest)
+fn clear_thread_goal(&self, state_db: &StateRuntime, thread_id: ThreadId)
+```
 
-    pub fn from_clients(
-        config: AwsObjectLogThreadStoreConfig,
-        dynamodb: aws_sdk_dynamodb::Client,
-        s3: aws_sdk_s3::Client,
-    ) -> Self;
+to:
+
+```rust
+fn get_thread_goal(&self, goal_store: &dyn ThreadGoalStore, thread_id: ThreadId)
+fn set_thread_goal(&self, goal_store: &dyn ThreadGoalStore, request: GoalSetRequest)
+fn clear_thread_goal(&self, goal_store: &dyn ThreadGoalStore, thread_id: ThreadId)
+```
+
+The service should retain business rules:
+
+- objective validation
+- token budget validation
+- runtime mutation permit handling
+- previous-goal snapshots
+- runtime side effects after successful durable writes
+
+The service should stop directly calling `state_db.thread_goals()`.
+
+### Selecting The Goal Store For A Thread
+
+Introduce a small resolver in app-server, not scattered call-site logic.
+
+Suggested type:
+
+```rust
+struct ThreadGoalStoreResolver {
+    local_goal_store: Option<Arc<dyn ThreadGoalStore>>,
+    thread_store: Arc<dyn ThreadStore>,
 }
 ```
 
-Use `from_clients` in tests so clients can point at LocalStack. Real AWS account validation can be added later as an optional manual test path.
+Responsibilities:
 
-## Data Model
+1. Given a `ThreadId`, decide whether goals are supported.
+2. Return `Arc<dyn ThreadGoalStore>` for supported threads.
+3. Return a typed unsupported result quickly for unsupported threads.
+4. Avoid local rollout path lookup for stores that can answer via backend capabilities.
 
-### DynamoDB Table
+Resolution policy:
 
-Use a single-table design.
+- For local ThreadStore:
+  - return the SQLite-backed local `GoalStore`
+  - only perform legacy rollout reconciliation when the target thread is local and a set/clear operation needs compatibility repair
+- For AWS Object Log ThreadStore:
+  - return the AWS-backed goal store
+  - do not call `find_thread_path_by_id_str`
+  - do not call `rollout_path()`
+- For in-memory or other stores:
+  - if they implement goal storage, return it
+  - otherwise return `Unsupported { operation: "thread/goal/*" }`
 
-Required key attributes:
+### Where The Backend Capability Lives
 
-```text
-pk: string
-sk: string
+Prefer a separate trait over adding goal methods directly to the main `ThreadStore` trait.
+
+Recommended:
+
+```rust
+pub trait ThreadStoreGoalExt: Send + Sync {
+    fn thread_goal_store(&self) -> Option<Arc<dyn ThreadGoalStore>>;
+}
 ```
 
-Thread partition:
+Possible implementation options:
+
+1. Add an optional method to `ThreadStore`:
+
+```rust
+fn goal_store(&self) -> Option<Arc<dyn ThreadGoalStore>> {
+    None
+}
+```
+
+2. Use `as_any()` downcast in app-server resolver for known store types.
+
+The better long-term option is method 1 because it is explicit and avoids downcast sprawl. This does expand the `ThreadStore` trait, but only with a default method and no mandatory implementation change for unsupported stores.
+
+### App-Server Goal Processor Changes
+
+Replace:
+
+- `state_db_for_materialized_thread`
+- `reconcile_thread_goal_rollout` as a universal precondition
+- `ThreadListenerCommand::EmitThreadGoalSnapshot { state_db }`
+
+with:
+
+- `goal_store_for_thread(thread_id) -> Result<Arc<dyn ThreadGoalStore>, JSONRPCErrorError>`
+- `reconcile_local_goal_rollout_if_needed(thread_id, goal_store)` only for local SQLite-backed threads
+- `ThreadListenerCommand::EmitThreadGoalSnapshot { goal_store: Arc<dyn ThreadGoalStore> }`
+
+Set/clear flow becomes:
+
+```text
+parse thread id
+resolve goal store
+if local compatibility requires it, reconcile local rollout
+call GoalService
+if local live thread exists, append ThreadGoalUpdated rollout item for preview compatibility
+send RPC response
+emit ordered notification
+apply runtime effects
+```
+
+Get flow becomes:
+
+```text
+parse thread id
+resolve goal store
+call GoalService::get_thread_goal
+return goal or null
+```
+
+Resume snapshot flow becomes:
+
+```text
+if goals disabled, skip
+resolve goal store
+if unsupported, log debug or trace and skip
+if supported, emit latest goal or cleared notification in listener order
+do not block startup on an expected unsupported backend
+```
+
+### AWS Object Log Goal Storage
+
+Implement `ThreadGoalStore` for AWS Object Log using DynamoDB.
+
+Preferred data model in the existing table:
 
 ```text
 pk = NS#{namespace}#THREAD#{thread_id}
-sk = HEAD
-sk = COMMIT#{start_seq_020}
-sk = IDEMP#APPEND#{idempotency_key}
-sk = SNAPSHOT#{snapshot_seq_020}
-sk = IMPORT#{import_id}
+sk = GOAL
 ```
 
-Use GSI projection attributes on the `HEAD` item for v1. This keeps authoritative thread metadata and list/search projection fields in one DynamoDB item, avoiding duplicate projection rows and projection drift.
+Attributes:
 
 ```text
-gsi1pk = NS#{namespace}#STATE#{active|archived}
-gsi1sk = UPDATED#{updated_at_epoch_ms}#THREAD#{thread_id}
-
-gsi2pk = NS#{namespace}#STATE#{active|archived}
-gsi2sk = CREATED#{created_at_epoch_ms}#THREAD#{thread_id}
+schema_version = 1
+namespace
+thread_id
+goal_id
+objective
+status
+token_budget
+tokens_used
+time_used_seconds
+created_at_ms
+updated_at_ms
 ```
 
-List/search consistency:
+Operations:
 
-- `read_thread`, `load_history`, and append correctness use strongly consistent base-table reads.
-- `list_threads` and metadata-only `search_threads` query GSIs and are eventually consistent.
-- Tests should not require read-after-write list consistency unless they poll or read by thread id first.
+- `get_thread_goal`: strongly consistent `GetItem`.
+- `replace_thread_goal`: `PutItem` or transactional write with a new `goal_id`, resetting usage counters to zero.
+- `insert_thread_goal`: conditional write/update that only replaces when no goal exists or current status is `complete`, matching SQLite behavior.
+- `update_thread_goal`: conditional `UpdateItem` with `expected_goal_id` guard when present.
+- `delete_thread_goal`: `DeleteItem` returning old attributes if supported by SDK operation shape, otherwise transactionally read then delete with condition.
+- `account_thread_goal_usage`: conditional `UpdateItem` that increments counters and updates status in one write.
+- `pause_active_thread_goal`: conditional status update from `active`.
+- `usage_limit_active_thread_goal`: conditional status update from `active` or `budget_limited`.
 
-Do not create separate projection items in v1. Revisit separate projection items only if GSI query patterns cannot satisfy pagination/filtering needs.
+AWS should use strongly consistent reads for direct goal operations because goal RPCs are thread-scoped and user-visible.
 
-Base thread partition reads must use strongly consistent `GetItem`/`Query` where correctness depends on committed history.
+### Local Rollout Reconciliation
 
-### DynamoDB HEAD Item
+Keep reconciliation only for local compatibility.
 
-The `HEAD` item stores:
+Current `reconcile_rollout(...)` scans the local rollout file and repairs SQLite goal state. That remains useful for old local rollouts that have `EventMsg::ThreadGoalUpdated` but no goals DB row.
 
-- schema version
-- namespace
-- thread id
-- session id
-- `head_seq`
-- `history_mode`
-- `extra_config`
-- `config_snapshot`
-- fork/parent/source fields
-- metadata projection fields currently represented by `ThreadMetadataSnapshot`
-- archive/delete markers
-- created/updated/recency timestamps
-- optional latest snapshot pointer
-
-### DynamoDB COMMIT Item
-
-Each commit item stores:
-
-- schema version
-- namespace
-- thread id
-- commit id
-- start sequence
-- end sequence
-- item count
-- S3 bucket
-- S3 key
-- payload byte length
-- payload SHA-256
-- created timestamp
-- optional compression
-
-### DynamoDB IDEMP Item
-
-Each append idempotency item stores:
-
-- schema version
-- namespace
-- thread id
-- operation name
-- idempotency key
-- request SHA-256
-- payload SHA-256
-- commit id
-- start sequence
-- end sequence
-- item count
-- created timestamp
-- optional expiration timestamp
-
-### S3 Payload Object
-
-Commit payload object:
-
-```json
-{
-  "schema": "codex.thread.commit.v1",
-  "namespace": "customer-prod",
-  "thread_id": "00000000-0000-4000-8000-000000000001",
-  "commit_id": "01JZ...",
-  "start_seq": 42,
-  "end_seq": 45,
-  "items": [
-    {
-      "seq": 42,
-      "rollout_item": {}
-    }
-  ]
-}
-```
-
-S3 object metadata:
-
-- schema
-- namespace
-- thread id
-- commit id
-- start sequence
-- end sequence
-- SHA-256
-
-S3 key:
+New rule:
 
 ```text
-{key_prefix}/namespaces/{namespace}/threads/{thread_id}/commits/{start_seq_020}-{end_seq_020}-{commit_id}.json.zst
+local SQLite-backed goal store:
+  may reconcile local rollout before set/clear or first read if needed
+
+remote AWS goal store:
+  must not reconcile local rollout
 ```
 
-## Append Algorithm
+For local get, consider avoiding unconditional reconciliation on every read. If existing behavior does not reconcile on get today except via `state_db_for_materialized_thread`, do not add new scan cost.
 
-Inputs:
+### Thread Metadata And Preview
 
-- `AppendThreadItemsParams`
-- generated or supplied idempotency key
-- optional expected next sequence
+`ThreadGoalUpdated` rollout items currently feed thread metadata sync and can set preview text for goal-first threads.
 
-Steps:
+Local:
 
-1. Canonicalize appended rollout items using existing `persisted_rollout_items`.
-2. If canonical item list is empty, return an empty append result without AWS writes.
-3. Serialize the commit payload with provisional sequence numbers.
-4. Compute request hash over canonical items and append options.
-5. Strongly read idempotency item by `IDEMP#APPEND#{idempotency_key}`.
-6. If idempotency item exists:
-   - compare request hash
-   - return recorded result if it matches
-   - fail with idempotency conflict if it differs
-7. Strongly read `HEAD` item to get `head_seq`.
-8. Compute `start_seq = head_seq + 1` and `end_seq = head_seq + item_count`.
-9. Build deterministic commit id and S3 key from thread id, idempotency key, start seq, end seq, and request hash.
-10. Put the S3 payload object.
-11. Execute DynamoDB `TransactWriteItems`:
-   - condition `HEAD.head_seq == previous_head_seq`
-   - put `COMMIT#{start_seq}` with `attribute_not_exists`
-   - put `IDEMP#APPEND#{idempotency_key}` with `attribute_not_exists`
-   - update `HEAD.head_seq = end_seq`
-   - update `HEAD.updated_at` and append-related metadata fields if included in the same operation
-12. If transaction succeeds, return append result.
-13. If transaction fails because idempotency now exists, strongly read idempotency item and replay/conflict.
-14. If transaction fails because `HEAD.head_seq` changed unexpectedly, return a split-brain/concurrent-write error.
-15. If response times out, retry from step 5. The idempotency item determines whether the commit completed.
+- Continue appending `ThreadGoalUpdated` rollout items for live local threads after successful goal set.
+- Continue using existing metadata sync paths.
 
-Important: S3 PUT happens before DynamoDB commit. Orphan S3 objects are safe because readers only follow committed DynamoDB pointers.
+AWS:
 
-## Idempotency Key Strategy
+- Goal state is durable in the goal item.
+- Thread preview metadata should be updated via `ThreadStore::update_thread_metadata` or store-owned metadata projection, not by requiring a local rollout append.
+- If AWS append of `ThreadGoalUpdated` rollout items is still desired for history replay, append to AWS Object Log through the live thread. This is optional for goal correctness but useful for parity with local history.
 
-Add an idempotency field to append inputs. The field may be optional at the Rust type level to avoid forcing local stores to invent keys, but the AWS object-log store must reject non-empty appends that do not include one.
+### Unsupported Backend Behavior
 
-```rust
-pub struct AppendThreadItemsParams {
-    pub thread_id: ThreadId,
-    pub items: Vec<RolloutItem>,
-    pub idempotency_key: Option<String>,
-    pub expected_next_seq: Option<u64>,
-}
-```
+Unsupported goals should be explicit and cheap.
 
-Local stores can ignore `idempotency_key` and `expected_next_seq` or use them for debug checks. The AWS object-log store must require `idempotency_key` and must use `expected_next_seq` when present.
+Expected behavior:
 
-`LiveThread` should generate stable append idempotency keys for each persisted append attempt. Suggested shape:
+- Direct `thread/goal/get` on unsupported backend returns JSON-RPC invalid request or unsupported operation with a clear message, for example `thread goals are not supported by this thread store`.
+- Resume snapshot emission skips unsupported stores without warning-level noise.
+- TUI startup should not pay hundreds of milliseconds formatting expected unsupported errors.
 
-```text
-thread:{thread_id}:session:{session_id}:window:{window_id}:append:{ordinal}
-```
+This should be treated separately from fatal storage errors:
 
-The key must be reused for retries of the same append call. It does not need to be reused after process death unless the same unacknowledged append can be reconstructed.
-
-Do not ship the durable AWS implementation with only single-call retry idempotency. The append idempotency key is part of the durability contract.
-
-## Read And Resume Algorithms
-
-### `read_thread(include_history=false)`
-
-1. Strongly read `HEAD`.
-2. Return metadata, config snapshot, source/fork fields, archive/delete status.
-3. Do not read S3 payloads.
-
-### `read_thread(include_history=true)`
-
-1. Strongly read `HEAD`.
-2. Load latest snapshot pointer if present.
-3. Query `COMMIT#` items from snapshot sequence + 1 through `HEAD.head_seq`.
-4. Fetch referenced S3 payloads.
-5. Verify SHA-256 and sequence ranges.
-6. Concatenate rollout items in sequence order.
-7. Return `StoredThread` with `StoredThreadHistory`.
-
-### `load_history`
-
-Use the same history loading path as `read_thread(include_history=true)`, but return only replayable history.
-
-### Cold Resume
-
-Cold app-server resume should:
-
-1. Call `ThreadStore.read_thread(... include_history=true)`.
-2. Use `StoredThread.config_snapshot` as the base config if present.
-3. Replay committed history from DynamoDB/S3.
-4. Use local state DB only for legacy threads without config snapshots.
-
-This was already partially wired in app-server; verify it against the real AWS-backed store.
-
-## Metadata Projection
-
-`update_thread_metadata` writes to DynamoDB, not S3.
-
-Rules:
-
-1. Strongly read or conditionally update the `HEAD` item.
-2. Apply `ThreadMetadataPatch` to `HEAD` metadata fields.
-3. Update list/search GSI projection attributes on the `HEAD` item in the same DynamoDB update.
-4. Since v1 uses GSI attributes on `HEAD`, there are no separate projection rows to drift from canonical metadata. GSI query results remain eventually consistent.
-5. Metadata fields derived from append observation should include or respect a committed sequence watermark.
-
-Search v1:
-
-- title/name
-- preview
-- first user message
-- model/provider filters
-- cwd filter
-- archived filter
-- relation filters that can be expressed from projected fields
-
-Search v1 does not search S3 payload content.
-
-## Archive, Unarchive, Delete
-
-### Archive
-
-1. Transact update `HEAD.archived_at`.
-2. Update active/archived GSI projection attributes on `HEAD`.
-3. Do not move S3 objects.
-
-### Unarchive
-
-1. Transact clear `HEAD.archived_at`.
-2. Update active/archived GSI projection attributes on `HEAD`.
-3. Do not move S3 objects.
-
-### Delete
-
-First version should use soft delete:
-
-1. Set `HEAD.deleted_at`.
-2. Remove or hide list/search projections.
-3. Leave S3 payloads for retention/lifecycle cleanup.
-
-Hard delete can be added later with explicit S3 batch delete and DynamoDB item deletion.
-
-## Snapshots And Compaction
-
-Snapshots and compaction are part of the first durable implementation. They do not need to be optimized in the first patch, but the backend should not be considered complete until long-thread replay can use a snapshot plus tail commits instead of unbounded commit payload reads.
-
-Snapshot item:
-
-- `SNAPSHOT#{seq}`
-- S3 bucket/key
-- sequence covered
-- byte length
-- SHA-256
-- created timestamp
-- schema version
-
-Snapshot S3 object:
-
-- compact replay state up to sequence N
-- enough rollout/history state for `load_history` to continue from sequence N + 1
-
-Compaction strategy:
-
-1. Commit append batches normally.
-2. Background or explicit compaction builds a snapshot at safe sequence N.
-3. Update `HEAD.latest_snapshot_seq` and snapshot pointer conditionally.
-4. Keep old commits until retention window expires.
-5. Readers use latest snapshot plus tail commits.
-
-No reader may require listing S3.
-
-## AWS Resource Plan
-
-### DynamoDB
-
-Provision:
-
-- table name from config
-- partition key `pk`
-- sort key `sk`
-- on-demand billing for first customer-account deployment
-- optional PITR
-- optional TTL for idempotency records and orphan markers
-- required GSIs for list projections
-
-### S3
-
-Provision:
-
-- bucket name from config
-- bucket versioning optional
-- SSE-S3 or SSE-KMS based on config
-- lifecycle rule for orphan staging objects and deleted thread payloads
-- block public access
-
-### IAM
-
-Minimum permissions:
-
-- `dynamodb:GetItem`
-- `dynamodb:PutItem`
-- `dynamodb:UpdateItem`
-- `dynamodb:DeleteItem` if hard delete is implemented
-- `dynamodb:Query`
-- `dynamodb:TransactWriteItems`
-- `s3:GetObject`
-- `s3:PutObject`
-- `s3:DeleteObject` if hard delete or cleanup is implemented
-- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey` when SSE-KMS is used
-
-IAM should restrict resources to the configured table and bucket/prefix.
+- Unsupported: expected capability absence.
+- Backend error: DynamoDB/SQLite/read failure and should be surfaced/logged.
 
 ## Implementation Steps
 
-### Phase 1: Replace Prototype With Real Backend Boundary
+### Step 1: Introduce The Trait
 
-1. Split `aws_object_log.rs` into a module directory.
-2. Move record structs into `records.rs`.
-3. Introduce `AwsObjectLogBackend` internal trait only if needed for tests.
-4. Ensure production `AwsObjectLogThreadStore` owns AWS DynamoDB and S3 clients.
-5. Rename any remaining in-memory object-log implementation to a test fake and keep it out of production constructors.
+1. Add `ThreadGoalStoreFuture` and `ThreadGoalStore` to `codex-state`.
+2. Document atomicity expectations and `expected_goal_id` semantics.
+3. Implement `ThreadGoalStore` for existing `codex_state::GoalStore`.
+4. Keep existing tests passing for `codex-state`.
 
-Success criteria:
+### Step 2: Decouple GoalService From StateRuntime
 
-- No production `AwsObjectLogThreadStore` state is backed by `HashMap` commit/head/payload maps.
-- Production constructor requires AWS clients or AWS config.
-- Unit tests can still exercise serialization and algorithmic helpers.
+1. Update `GoalService` methods to accept `&dyn ThreadGoalStore`.
+2. Move direct `state_db.thread_goals()` calls behind the trait.
+3. Keep validation and runtime-effect behavior in `GoalService`.
+4. Update goal extension tests to use the SQLite implementation through the trait.
 
-### Phase 2: Add AWS Record Serialization
+### Step 3: Add Store Capability Plumbing
 
-1. Define DynamoDB item encoders/decoders for `HEAD`, `COMMIT`, `IDEMP`, `SNAPSHOT`, and projection records.
-2. Define S3 payload envelope structs.
-3. Add schema version fields.
-4. Add SHA-256 hashing for payload verification.
-5. Add optional compression.
+1. Add a default `goal_store()` method to `ThreadStore`, returning `None`.
+2. Implement it for `LocalThreadStore` by returning the SQLite `GoalStore` when available.
+3. Implement it for AWS Object Log by returning an AWS-backed goal store.
+4. Implement it for in-memory only if needed by tests; otherwise leave unsupported.
 
-Success criteria:
+### Step 4: Refactor App-Server Goal Processor
 
-- Round-trip tests cover each DynamoDB record type.
-- S3 payload round-trip tests verify item sequence order and hash validation.
-- Decoder rejects unsupported schema versions.
+1. Replace `state_db_for_materialized_thread` with `goal_store_for_thread`.
+2. Restrict `reconcile_thread_goal_rollout` to local SQLite-backed stores.
+3. Update get/set/clear to call `GoalService` with a `ThreadGoalStore`.
+4. Update resume snapshot ordering to carry a goal-store handle instead of `StateDbHandle`.
+5. Change unsupported resume snapshot logging from `warn` to `debug` or skip silently.
 
-### Phase 3: Implement Durable Create/Read
+### Step 5: Implement AWS Goal Store
 
-1. Implement `create_thread` as conditional DynamoDB `PutItem` for `HEAD`.
-2. Store `StoredThreadConfigSnapshot` on `HEAD`.
-3. Implement `read_thread(include_history=false)` from `HEAD`.
-4. Implement `list_threads` from `HEAD` GSI attributes.
-5. Preserve local legacy behavior in `LocalThreadStore`.
+1. Add AWS goal item serialization records under the AWS object-log module.
+2. Add DynamoDB read/write helpers for the `GOAL` item.
+3. Implement all `ThreadGoalStore` operations with conditional writes.
+4. Add unit tests for record serialization and conditional update request construction where possible.
+5. Add LocalStack integration coverage for get, set, update, clear, accounting, and process restart behavior.
 
-Success criteria:
+### Step 6: Preserve Metadata And History Parity
 
-- Creating a thread persists a `HEAD` item in DynamoDB.
-- Reading after create returns metadata and config snapshot from DynamoDB.
-- Duplicate create fails closed.
-- Tests prove process-local memory is not required after create.
+1. Confirm local goal-first thread list preview still updates.
+2. Decide whether AWS goal updates should append `EventMsg::ThreadGoalUpdated` to AWS history.
+3. If yes, append through the existing live thread persistence path after durable goal update succeeds.
+4. If no, ensure AWS thread metadata preview is updated through metadata projection instead.
 
-### Phase 4: Implement Durable Append
+### Step 7: Clean Up Startup Probe Cost
 
-1. Extend append parameters for idempotency and expected sequence.
-2. Implement S3 payload PUT.
-3. Implement DynamoDB transaction for commit pointer, idempotency record, and head sequence update.
-4. Implement timeout/retry recovery through strongly consistent idempotency reads.
-5. Implement split-brain detection through `HEAD.head_seq` condition checks.
+1. Update TUI resume code to avoid expensive `wrap_err` formatting for expected unsupported goal reads.
+2. Prefer capability-aware skip before issuing `thread/goal/get` when app-server exposes enough information.
+3. If protocol cannot expose capability yet, make app-server unsupported responses cheap and non-warning.
 
-Success criteria:
-
-- Append writes S3 payload and DynamoDB commit pointer.
-- Retry with same idempotency key returns same sequence range.
-- Retry with changed payload fails.
-- Network-timeout simulation after transaction recovers by reading idempotency record.
-- S3 orphan objects are ignored by reads.
-
-### Phase 5: Implement Durable History Replay
-
-1. Query DynamoDB commit pointers by thread partition.
-2. Fetch S3 payloads concurrently with bounded concurrency.
-3. Verify hashes and sequence ranges.
-4. Return ordered `StoredThreadHistory`.
-5. Wire `read_thread(include_history=true)` and `load_history` to this path.
-
-Success criteria:
-
-- A new store instance with empty memory can reconstruct a committed thread from DynamoDB/S3.
-- Missing S3 object returns a clear storage corruption error.
-- Hash mismatch returns a clear storage corruption error.
-- Commit gaps return a clear storage corruption error.
-
-### Phase 6: Implement Metadata, Search, Archive, Delete
-
-1. Implement `update_thread_metadata` as DynamoDB updates.
-2. Keep list/search projection fields in sync.
-3. Implement archive/unarchive with projection updates.
-4. Implement soft delete.
-5. Do not implement hard delete in v1.
-
-Success criteria:
-
-- List/read/search reflect committed metadata updates.
-- Archive hides threads from active list and shows them in archived list.
-- Unarchive reverses archive.
-- Delete hides thread without requiring immediate S3 deletion.
-
-### Phase 7: Implement Import
-
-1. Read existing local rollout history.
-2. Chunk into commit payloads.
-3. Write chunks to S3.
-4. Commit pointers to DynamoDB with deterministic import idempotency.
-5. Create or update `HEAD` with imported metadata and config snapshot when available.
-
-Success criteria:
-
-- Imported local history can be replayed from AWS only.
-- Re-running the same import is idempotent.
-- Partial import can resume or fail cleanly without corrupting committed history.
-
-### Phase 8: Add Snapshot/Compaction
-
-1. Add snapshot writer for long histories.
-2. Add latest snapshot pointer on `HEAD`.
-3. Teach history replay to use snapshot plus tail commits.
-4. Add cleanup policy for old commit payloads after retention window.
-
-Success criteria:
-
-- Long thread replay uses bounded S3 GETs after snapshot.
-- Snapshot hash and sequence validation are enforced.
-- Tail commits after snapshot replay correctly.
-
-### Phase 9: Wire Configuration
-
-1. Add app-server/core config fields for remote AWS ThreadStore table, bucket, namespace, region, endpoint, and KMS settings.
-2. Ensure config schema updates are generated if `ConfigToml` changes.
-3. Preserve existing local default.
-4. Make remote store opt-in.
-
-Success criteria:
-
-- A user can select AWS object-log ThreadStore through config.
-- Missing required table/bucket config fails at startup with a clear error.
-- Local ThreadStore behavior is unchanged by default.
-
-## Test Plan
+## Testing Plan
 
 ### Unit Tests
 
-- Record serialization/deserialization.
-- Unsupported schema versions.
-- Payload hash computation and verification.
-- Idempotency conflict detection.
-- Commit sequence gap detection.
-- Config snapshot encode/decode.
+- `codex-state`: trait implementation preserves current SQLite goal semantics.
+- `codex-goal-extension`: `GoalService` works against a trait-backed fake and SQLite store.
+- AWS record serialization round trips.
+- AWS conditional update builders cover stale `expected_goal_id` and status filters.
 
-### Fake Backend Tests
+### Integration Tests
 
-Use a test-only fake backend if it helps exercise algorithm branches. The fake must not be exported or wired as the production store.
-
-Test cases:
-
-- S3 PUT succeeds, DynamoDB transaction fails.
-- DynamoDB transaction succeeds, response timeout occurs.
-- Idempotency record exists before retry.
-- Concurrent append changes `HEAD.head_seq`.
-- Missing S3 payload.
-- Hash mismatch.
-
-### AWS-Compatible Integration Tests
-
-Run against LocalStack by default. Real AWS account tests can be added later as optional/manual validation.
-
-Required local setup:
-
-- LocalStack for DynamoDB + S3.
-
-Tests:
-
-1. `create_thread` persists `HEAD`.
-2. `create_thread` persists config snapshot.
-3. `read_thread` can run from a fresh store instance.
-4. `append_items` persists S3 payload and DynamoDB commit pointer.
-5. `load_history` reconstructs ordered rollout items from a fresh store instance.
-6. Same idempotency key replays original commit.
-7. Same idempotency key with different payload conflicts.
-8. Unexpected `HEAD.head_seq` fails closed.
-9. Orphan S3 object is ignored.
-10. Metadata update changes list/search projection.
-11. Archive/unarchive/delete projection behavior.
-12. Import from local rollout history.
-
-### App-Server Tests
-
-- Cold `thread/resume` reads from ThreadStore with `include_history=true`.
-- Remote stored config snapshot is used as resumed config base.
-- Local state DB fallback is used only for legacy threads without snapshot.
-- Running-thread rejoin behavior remains unchanged.
+- Local app-server:
+  - set/get/clear still works
+  - goal-first thread preview still appears
+  - resume emits goal snapshot in the same order as today
+- AWS Object Log with LocalStack:
+  - create thread, set goal, kill/recreate app-server/store, resume, get same goal
+  - update with correct `expected_goal_id` succeeds
+  - update with stale `expected_goal_id` fails or returns no update
+  - accounting increments usage atomically
+  - clear survives restart
+  - no local rollout path is required
+- Unsupported store:
+  - direct goal RPC returns explicit unsupported error
+  - resume does not emit warning-level log spam
+  - startup first-frame rendering is not blocked on expected unsupported goal state
 
 ## Success Criteria
 
-The feature is complete when:
+1. AWS-backed resumed threads can use `thread/goal/get`, `thread/goal/set`, and `thread/goal/clear` without a local rollout file.
+2. AWS goal state persists across app-server process restart and machine-local state loss.
+3. Local SQLite-backed goals behave the same as before.
+4. No app-server goal path requires `thread.rollout_path()` except the local-only reconciliation path.
+5. Resume of an AWS thread no longer logs `ephemeral thread does not support goals`.
+6. Resume startup avoids the previously observed slow failing `thread/goal/get` path.
+7. Tests cover local, AWS, and unsupported-store behavior.
 
-1. Production `AwsObjectLogThreadStore` uses AWS DynamoDB and S3 clients.
-2. A process can create a thread, append history, exit, and a new process can read and resume from AWS only.
-3. The current in-memory object-log maps are not part of production remote storage.
-4. Idempotent append retry is proven by tests.
-5. Split-brain accidental concurrent appends fail closed by DynamoDB condition checks.
-6. Config snapshot persists on `HEAD` and is consumed by cold resume.
-7. List/read/search/archive/delete work from DynamoDB projections.
-8. Local ThreadStore behavior remains unchanged.
-9. Customer-account deployment requires only DynamoDB, S3, IAM, optional KMS, and optional lifecycle rules.
-10. Scoped tests pass:
-    - `just fmt`
-    - `just test -p codex-thread-store`
-    - `just test -p codex-app-server`
-    - `just test -p codex-core` if core config/session code changes
-11. Dependency changes include updated Cargo and Bazel lockfiles where possible.
+## Risks
 
-## Decisions
+1. Goal runtime code may still hold direct `StateRuntime` or `GoalStore` references outside the app-server RPC path.
+2. AWS conditional expressions for accounting can become complex and should be reviewed carefully against SQLite behavior.
+3. Updating thread preview metadata for AWS may require choosing between appending goal events to history and writing a metadata projection.
+4. Adding `goal_store()` to `ThreadStore` expands the trait surface, though the default method keeps existing stores source-compatible.
+5. If app-server protocol needs an explicit `supportsGoals` capability later, that should be a separate API compatibility change.
 
-1. The first durable version requires an append idempotency key for every non-empty AWS append.
-2. CI/local integration tests use LocalStack for DynamoDB + S3.
-3. v1 uses soft delete plus S3 lifecycle policy, not hard delete.
-4. Snapshots/compaction are included in the first durable implementation, not deferred indefinitely after append/read.
-5. v1 uses GSI attributes on the `HEAD` item for list projections. Separate projection items are deferred unless GSI-based pagination/filtering proves insufficient.
+## Implementation Notes
 
-## Implementation Guidance
-
-Prioritize the smallest real durable sequence:
-
-1. Real AWS create/read.
-2. Real AWS append/idempotency.
-3. Real AWS load history from a fresh store instance.
-4. Metadata/list/archive.
-5. Import.
-6. Snapshot/compaction before marking the durable backend complete.
-
-Do not spend more time extending the in-memory prototype except as a test fake. Every production path should move toward actual DynamoDB and S3 persistence.
+- Do not implement a remote `rollout_path`.
+- Do not materialize AWS history into local JSONL as part of goal support.
+- Keep goal storage durability separate from rollout history durability, while optionally recording goal events in history for replay parity.
+- Prefer small, staged PRs:
+  1. trait plus SQLite implementation
+  2. GoalService/app-server decoupling
+  3. AWS implementation
+  4. startup probe optimization

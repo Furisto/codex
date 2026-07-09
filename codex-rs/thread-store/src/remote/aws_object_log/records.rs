@@ -25,6 +25,7 @@ pub(crate) const COMMIT_SCHEMA: &str = "codex.thread.commit-pointer.v1";
 pub(crate) const IDEMPOTENCY_SCHEMA: &str = "codex.thread.idempotency.v1";
 pub(crate) const COMMIT_PAYLOAD_SCHEMA: &str = "codex.thread.commit-payload.v1";
 pub(crate) const SNAPSHOT_PAYLOAD_SCHEMA: &str = "codex.thread.snapshot-payload.v1";
+pub(crate) const GOAL_SCHEMA: &str = "codex.thread.goal.v1";
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ThreadHeadRecord {
@@ -97,6 +98,21 @@ pub(crate) struct IdempotencyRecord {
     pub payload_sha256: String,
     pub result: AwsObjectLogAppendResult,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ThreadGoalRecord {
+    pub schema: String,
+    pub namespace: String,
+    pub thread_id: ThreadId,
+    pub goal_id: String,
+    pub objective: String,
+    pub status: codex_state::ThreadGoalStatus,
+    pub token_budget: Option<i64>,
+    pub tokens_used: i64,
+    pub time_used_seconds: i64,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

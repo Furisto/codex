@@ -93,6 +93,15 @@ impl<C> GoalExtension<C> {
             goals_enabled: Arc::new(goals_enabled),
         }
     }
+
+    fn goal_store(&self) -> Arc<dyn codex_state::ThreadGoalStore> {
+        if let Some(thread_manager) = self.thread_manager.upgrade()
+            && let Some(goal_store) = thread_manager.thread_store().goal_store()
+        {
+            return goal_store;
+        }
+        Arc::new(self.state_dbs.thread_goals().clone())
+    }
 }
 
 impl<C> ThreadLifecycleContributor<C> for GoalExtension<C>
@@ -119,7 +128,7 @@ where
             let runtime = input.thread_store.get_or_init::<GoalRuntimeHandle>(|| {
                 GoalRuntimeHandle::new(
                     thread_id,
-                    Arc::clone(&self.state_dbs),
+                    self.goal_store(),
                     self.event_emitter.clone(),
                     self.metrics.clone(),
                     self.thread_manager.clone(),
@@ -220,12 +229,7 @@ where
                 accounting.clear_current_turn_goal();
                 return;
             }
-            let Ok(goal) = self
-                .state_dbs
-                .thread_goals()
-                .get_thread_goal(runtime.thread_id())
-                .await
-            else {
+            let Ok(goal) = self.goal_store().get_thread_goal(runtime.thread_id()).await else {
                 return;
             };
             if let Some(goal) = goal
@@ -422,6 +426,7 @@ where
         vec![
             Arc::new(GoalToolExecutor::get(
                 runtime.thread_id(),
+                runtime.goal_store(),
                 Arc::clone(&self.state_dbs),
                 runtime.accounting_state(),
                 self.analytics.clone(),
@@ -430,6 +435,7 @@ where
             )),
             Arc::new(GoalToolExecutor::create(
                 runtime.thread_id(),
+                runtime.goal_store(),
                 Arc::clone(&self.state_dbs),
                 runtime.accounting_state(),
                 self.analytics.clone(),
@@ -438,6 +444,7 @@ where
             )),
             Arc::new(GoalToolExecutor::update(
                 runtime.thread_id(),
+                runtime.goal_store(),
                 Arc::clone(&self.state_dbs),
                 runtime.accounting_state(),
                 self.analytics.clone(),

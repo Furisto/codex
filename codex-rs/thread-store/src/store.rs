@@ -1,8 +1,10 @@
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
+use codex_state::ThreadGoalStore;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::AppendThreadItemsParams;
 use crate::ArchiveThreadParams;
@@ -40,6 +42,11 @@ pub trait ThreadStore: Any + Send + Sync {
     /// already paginated should override this instead of relying on core to infer storage behavior.
     fn default_history_mode(&self) -> ThreadHistoryMode {
         ThreadHistoryMode::Legacy
+    }
+
+    /// Returns durable goal storage when this thread store supports backend-owned goals.
+    fn goal_store(&self) -> Option<Arc<dyn ThreadGoalStore>> {
+        None
     }
 
     /// Creates a new live thread.
