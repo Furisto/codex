@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -23,6 +24,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::Instrument;
 use tracing::Span;
+use tracing::info;
 use tracing::warn;
 
 use crate::error_code::internal_error;
@@ -702,6 +704,16 @@ impl OutgoingMessageSender {
         message: OutgoingMessage,
         message_kind: &'static str,
     ) {
+        let request_id = outgoing_message_request_id(&message).cloned();
+        let started_at = Instant::now();
+        if let Some(request_id) = request_id.as_ref() {
+            info!(
+                connection_id = %connection_id,
+                request_id = ?request_id,
+                message_kind,
+                "app-server outgoing enqueue started"
+            );
+        }
         let send_fut = self.sender.send(OutgoingEnvelope::ToConnection {
             connection_id,
             message,
@@ -715,7 +727,23 @@ impl OutgoingMessageSender {
 
         if let Err(err) = send_result {
             warn!("failed to send {message_kind} to client: {err:?}");
+        } else if let Some(request_id) = request_id.as_ref() {
+            info!(
+                connection_id = %connection_id,
+                request_id = ?request_id,
+                message_kind,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "app-server outgoing enqueue completed"
+            );
         }
+    }
+}
+
+fn outgoing_message_request_id(message: &OutgoingMessage) -> Option<&RequestId> {
+    match message {
+        OutgoingMessage::Response(response) => Some(&response.id),
+        OutgoingMessage::Error(error) => Some(&error.id),
+        OutgoingMessage::Request(_) | OutgoingMessage::AppServerNotification(_) => None,
     }
 }
 

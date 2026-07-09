@@ -1071,8 +1071,19 @@ See the Codex keymap documentation for supported actions and examples."
         let initial_session_started_at = Instant::now();
         if let Some(started) = initial_started_thread {
             let thread_id = started.session.thread_id;
+            let turn_count = started.turns.len();
+            let has_rollout_path = started.session.rollout_path.is_some();
+            let enqueue_started_at = Instant::now();
             app.enqueue_primary_thread_session(started.session, started.turns)
                 .await?;
+            tracing::info!(
+                thread_id = %thread_id,
+                turn_count,
+                has_rollout_path,
+                elapsed_ms = enqueue_started_at.elapsed().as_millis(),
+                total_initial_session_elapsed_ms = initial_session_started_at.elapsed().as_millis(),
+                "TUI startup initial session enqueue completed"
+            );
             if should_prompt_for_paused_goal_after_startup_resume {
                 app.maybe_prompt_resume_paused_goal_after_resume(&mut app_server, thread_id)
                     .await;

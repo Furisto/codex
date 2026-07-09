@@ -8,6 +8,7 @@ use super::forward_incoming_message;
 use super::next_connection_id;
 use super::serialize_outgoing_message;
 use crate::outgoing_message::ConnectionId;
+use crate::outgoing_message::OutgoingMessage;
 use crate::outgoing_message::QueuedOutgoingMessage;
 use axum::Router;
 use axum::body::Body;
@@ -34,6 +35,7 @@ use owo_colors::Style;
 use std::io::Result as IoResult;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -313,17 +315,44 @@ async fn run_websocket_outbound_loop<M, SinkError>(
                 let Some(queued_message) = queued_message else {
                     break;
                 };
+                let request_id = outgoing_message_request_id(&queued_message.message).cloned();
+                if let Some(request_id) = request_id.as_ref() {
+                    info!(
+                        request_id = ?request_id,
+                        pending_writer_messages = writer_rx.len(),
+                        "websocket outbound write started"
+                    );
+                }
+                let started_at = Instant::now();
                 let Some(json) = serialize_outgoing_message(queued_message.message) else {
                     continue;
                 };
                 if websocket_writer.send(M::text(json)).await.is_err() {
                     break;
                 }
+                if let Some(request_id) = request_id.as_ref() {
+                    info!(
+                        request_id = ?request_id,
+                        pending_writer_messages = writer_rx.len(),
+                        elapsed_ms = started_at.elapsed().as_millis(),
+                        "websocket outbound write completed"
+                    );
+                }
                 if let Some(write_complete_tx) = queued_message.write_complete_tx {
                     let _ = write_complete_tx.send(());
                 }
             }
         }
+    }
+}
+
+fn outgoing_message_request_id(
+    message: &OutgoingMessage,
+) -> Option<&codex_app_server_protocol::RequestId> {
+    match message {
+        OutgoingMessage::Response(response) => Some(&response.id),
+        OutgoingMessage::Error(error) => Some(&error.id),
+        OutgoingMessage::Request(_) | OutgoingMessage::AppServerNotification(_) => None,
     }
 }
 

@@ -396,6 +396,7 @@ pub fn remote_addr_supports_auth_token(endpoint: &RemoteAppServerEndpoint) -> bo
 async fn connect_remote_app_server(
     endpoint: RemoteAppServerEndpoint,
 ) -> color_eyre::Result<AppServerClient> {
+    let started_at = Instant::now();
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
         endpoint,
         client_name: "codex-tui".to_string(),
@@ -407,6 +408,10 @@ async fn connect_remote_app_server(
     })
     .await
     .wrap_err("failed to connect to remote app server")?;
+    tracing::info!(
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "TUI remote app-server connect completed"
+    );
     Ok(AppServerClient::Remote(app_server))
 }
 
@@ -458,6 +463,7 @@ async fn start_app_server(
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
 ) -> color_eyre::Result<AppServerClient> {
+    let started_at = Instant::now();
     match target {
         AppServerTarget::Embedded => start_embedded_app_server(
             arg0_paths,
@@ -472,9 +478,22 @@ async fn start_app_server(
             environment_manager,
         )
         .await
-        .map(AppServerClient::InProcess),
+        .map(|client| {
+            tracing::info!(
+                target = ?target,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "TUI app-server start completed"
+            );
+            AppServerClient::InProcess(client)
+        }),
         AppServerTarget::LocalDaemon { endpoint } | AppServerTarget::Remote { endpoint } => {
-            connect_remote_app_server(endpoint.clone()).await
+            let client = connect_remote_app_server(endpoint.clone()).await?;
+            tracing::info!(
+                target = ?target,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "TUI app-server start completed"
+            );
+            Ok(client)
         }
     }
 }
@@ -1296,6 +1315,7 @@ async fn run_ratatui_app(
     state_db: Option<StateDbHandle>,
     environment_manager: Arc<EnvironmentManager>,
 ) -> color_eyre::Result<AppExitInfo> {
+    let ratatui_started_at = Instant::now();
     let uses_remote_workspace = app_server_target.uses_remote_workspace();
     color_eyre::install()?;
 
@@ -1360,7 +1380,13 @@ async fn run_ratatui_app(
     )
     .await
     {
-        Ok(app_server) => AppServerSession::new(app_server, app_server_target.thread_params_mode()),
+        Ok(app_server) => {
+            tracing::info!(
+                elapsed_ms = ratatui_started_at.elapsed().as_millis(),
+                "TUI startup app-server session initialized"
+            );
+            AppServerSession::new(app_server, app_server_target.thread_params_mode())
+        }
         Err(err) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1767,8 +1793,13 @@ async fn run_ratatui_app(
         app_server.bootstrap(&config),
         load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
     );
+    tracing::info!(
+        elapsed_ms = startup_prefetch_started_at.elapsed().as_millis(),
+        "TUI startup bootstrap and hooks prefetch completed"
+    );
     let startup_bootstrap = Some(startup_bootstrap?);
     let startup_elapsed_before_app = startup_prefetch_started_at.elapsed();
+    let hooks_review_started_at = Instant::now();
     let startup_hooks_browser = match maybe_run_startup_hooks_review(
         &mut app_server,
         &mut tui,
@@ -1781,6 +1812,11 @@ async fn run_ratatui_app(
         StartupHooksReviewOutcome::Continue => None,
         StartupHooksReviewOutcome::OpenHooksBrowser(data) => Some(data),
     };
+    tracing::info!(
+        elapsed_ms = hooks_review_started_at.elapsed().as_millis(),
+        total_startup_elapsed_ms = ratatui_started_at.elapsed().as_millis(),
+        "TUI startup hooks review completed"
+    );
 
     let app_result = App::run(
         &mut tui,

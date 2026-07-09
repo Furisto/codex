@@ -3,6 +3,7 @@ mod records;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::time::Instant;
 
 use aws_config::BehaviorVersion;
 use aws_sdk_dynamodb::Client as DynamoDbClient;
@@ -434,21 +435,47 @@ impl AwsObjectLogThreadStore {
         &self,
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreResult<StoredThreadHistory> {
+        let started_at = Instant::now();
         let head = self
             .read_head(params.thread_id, params.include_archived)
             .await?;
+        let head_seq = head.head_seq;
+        let history_started_at = Instant::now();
+        let items = self.load_items_for_head(&head).await?;
+        tracing::info!(
+            thread_id = %params.thread_id,
+            head_seq,
+            history_item_count = items.len(),
+            history_load_elapsed_ms = elapsed_ms(history_started_at),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log load_history completed"
+        );
         Ok(StoredThreadHistory {
             thread_id: params.thread_id,
-            items: self.load_items_for_head(&head).await?,
+            items,
         })
     }
 
     async fn read_thread(&self, params: ReadThreadParams) -> ThreadStoreResult<StoredThread> {
+        let started_at = Instant::now();
         let head = self
             .read_head(params.thread_id, params.include_archived)
             .await?;
-        self.stored_thread_from_head(head, params.include_history)
-            .await
+        let head_seq = head.head_seq;
+        let stored_thread_started_at = Instant::now();
+        let thread = self
+            .stored_thread_from_head(head, params.include_history)
+            .await?;
+        tracing::info!(
+            thread_id = %params.thread_id,
+            include_history = params.include_history,
+            head_seq,
+            stored_thread_elapsed_ms = elapsed_ms(stored_thread_started_at),
+            history_item_count = thread.history.as_ref().map(|history| history.items.len()),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log read_thread completed"
+        );
+        Ok(thread)
     }
 
     async fn list_threads(&self, params: ListThreadsParams) -> ThreadStoreResult<ThreadPage> {
@@ -712,6 +739,7 @@ impl AwsObjectLogThreadStore {
         thread_id: ThreadId,
         include_archived: bool,
     ) -> ThreadStoreResult<ThreadHeadRecord> {
+        let started_at = Instant::now();
         let clients = self.clients().await?;
         let output = clients
             .dynamodb
@@ -737,6 +765,14 @@ impl AwsObjectLogThreadStore {
                 message: format!("thread {thread_id} is archived"),
             });
         }
+        tracing::info!(
+            %thread_id,
+            include_archived,
+            head_seq = head.head_seq,
+            has_snapshot = head.latest_snapshot.is_some(),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log read_head completed"
+        );
         Ok(head)
     }
 
@@ -801,16 +837,30 @@ impl AwsObjectLogThreadStore {
         &self,
         head: &ThreadHeadRecord,
     ) -> ThreadStoreResult<Vec<RolloutItem>> {
+        let started_at = Instant::now();
         let mut items = Vec::new();
         let mut expected_seq = 1;
+        let mut snapshot_item_count = 0;
+        let mut snapshot_elapsed_ms = None;
         if let Some(snapshot) = head.latest_snapshot.as_ref() {
+            let snapshot_started_at = Instant::now();
             let snapshot_items = self.get_snapshot_payload(head.thread_id, snapshot).await?;
+            snapshot_item_count = snapshot_items.len();
+            snapshot_elapsed_ms = Some(elapsed_ms(snapshot_started_at));
             expected_seq = snapshot.seq + 1;
             items.extend(snapshot_items);
         }
+        let query_started_at = Instant::now();
         let commits = self.query_commit_pointers(head.thread_id).await?;
+        let query_elapsed_ms = elapsed_ms(query_started_at);
+        let total_commit_count = commits.len();
+        let mut skipped_commit_count = 0;
+        let mut loaded_commit_count = 0;
+        let mut loaded_commit_item_count = 0;
+        let mut commit_payload_elapsed_ms = 0;
         for commit in commits {
             if commit.start_seq < expected_seq {
+                skipped_commit_count += 1;
                 continue;
             }
             if commit.start_seq != expected_seq {
@@ -821,7 +871,11 @@ impl AwsObjectLogThreadStore {
                     ),
                 });
             }
+            let commit_started_at = Instant::now();
             let payload_items = self.get_commit_payload(&commit).await?;
+            loaded_commit_count += 1;
+            loaded_commit_item_count += payload_items.len();
+            commit_payload_elapsed_ms += elapsed_ms(commit_started_at);
             for item in payload_items {
                 if item.seq != expected_seq {
                     return Err(ThreadStoreError::Internal {
@@ -853,6 +907,22 @@ impl AwsObjectLogThreadStore {
                 ),
             });
         }
+        tracing::info!(
+            thread_id = %head.thread_id,
+            head_seq = head.head_seq,
+            has_snapshot = head.latest_snapshot.is_some(),
+            snapshot_item_count,
+            snapshot_elapsed_ms,
+            total_commit_count,
+            skipped_commit_count,
+            loaded_commit_count,
+            loaded_commit_item_count,
+            query_commit_pointers_elapsed_ms = query_elapsed_ms,
+            commit_payloads_elapsed_ms = commit_payload_elapsed_ms,
+            history_item_count = items.len(),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log load_items_for_head completed"
+        );
         Ok(items)
     }
 
@@ -860,6 +930,7 @@ impl AwsObjectLogThreadStore {
         &self,
         thread_id: ThreadId,
     ) -> ThreadStoreResult<Vec<CommitPointerRecord>> {
+        let started_at = Instant::now();
         let clients = self.clients().await?;
         let output = clients
             .dynamodb
@@ -879,6 +950,12 @@ impl AwsObjectLogThreadStore {
             .map(|item| decode_record(&item, "commit"))
             .collect::<ThreadStoreResult<Vec<CommitPointerRecord>>>()?;
         commits.sort_by_key(|commit| commit.start_seq);
+        tracing::info!(
+            %thread_id,
+            commit_count = commits.len(),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log query_commit_pointers completed"
+        );
         Ok(commits)
     }
 
@@ -886,9 +963,11 @@ impl AwsObjectLogThreadStore {
         &self,
         commit: &CommitPointerRecord,
     ) -> ThreadStoreResult<Vec<SequencedRolloutItem>> {
+        let started_at = Instant::now();
         let bytes = self
             .get_s3_object(commit.bucket.as_str(), commit.key.as_str())
             .await?;
+        let byte_count = bytes.len();
         verify_sha256(&bytes, commit.payload_sha256.as_str(), commit.key.as_str())?;
         let envelope: CommitPayloadEnvelope =
             serde_json::from_slice(&bytes).map_err(|err| ThreadStoreError::Internal {
@@ -904,6 +983,15 @@ impl AwsObjectLogThreadStore {
                 message: format!("commit payload item count mismatch for {}", commit.key),
             });
         }
+        tracing::info!(
+            thread_id = %commit.thread_id,
+            start_seq = commit.start_seq,
+            end_seq = commit.end_seq,
+            item_count = envelope.items.len(),
+            byte_count,
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log get_commit_payload completed"
+        );
         Ok(envelope.items)
     }
 
@@ -912,9 +1000,11 @@ impl AwsObjectLogThreadStore {
         thread_id: ThreadId,
         snapshot: &SnapshotPointerRecord,
     ) -> ThreadStoreResult<Vec<RolloutItem>> {
+        let started_at = Instant::now();
         let bytes = self
             .get_s3_object(snapshot.bucket.as_str(), snapshot.key.as_str())
             .await?;
+        let byte_count = bytes.len();
         verify_sha256(
             &bytes,
             snapshot.payload_sha256.as_str(),
@@ -937,10 +1027,24 @@ impl AwsObjectLogThreadStore {
                 ),
             });
         }
-        Ok(envelope.items.into_iter().map(|item| item.item).collect())
+        let items = envelope
+            .items
+            .into_iter()
+            .map(|item| item.item)
+            .collect::<Vec<_>>();
+        tracing::info!(
+            %thread_id,
+            snapshot_seq = snapshot.seq,
+            item_count = items.len(),
+            byte_count,
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log get_snapshot_payload completed"
+        );
+        Ok(items)
     }
 
     async fn get_s3_object(&self, bucket: &str, key: &str) -> ThreadStoreResult<Vec<u8>> {
+        let started_at = Instant::now();
         let clients = self.clients().await?;
         let output = clients
             .s3
@@ -953,7 +1057,15 @@ impl AwsObjectLogThreadStore {
         let bytes = output.body.collect().await.map_err(internal_aws_error(
             "failed to read AWS object-log payload body",
         ))?;
-        Ok(bytes.into_bytes().to_vec())
+        let bytes = bytes.into_bytes().to_vec();
+        tracing::info!(
+            bucket,
+            key,
+            byte_count = bytes.len(),
+            elapsed_ms = elapsed_ms(started_at),
+            "AWS object-log get_s3_object completed"
+        );
+        Ok(bytes)
     }
 
     async fn ensure_snapshot(&self, thread_id: ThreadId) -> ThreadStoreResult<()> {
@@ -1584,6 +1696,11 @@ fn verify_sha256(bytes: &[u8], expected: &str, label: &str) -> ThreadStoreResult
 
 fn timestamp_millis(timestamp: DateTime<Utc>) -> i64 {
     timestamp.timestamp_millis()
+}
+
+fn elapsed_ms(started_at: Instant) -> u64 {
+    let elapsed_ms = started_at.elapsed().as_millis();
+    elapsed_ms.min(u128::from(u64::MAX)) as u64
 }
 
 fn internal_aws_error<E: Debug>(context: &'static str) -> impl FnOnce(E) -> ThreadStoreError {

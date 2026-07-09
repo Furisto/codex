@@ -263,8 +263,14 @@ impl AppServerSession {
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppServerBootstrap> {
         let started_at = Instant::now();
+        let account_started_at = Instant::now();
         let account = self.read_account().await?;
+        tracing::info!(
+            elapsed_ms = account_started_at.elapsed().as_millis(),
+            "TUI app-server bootstrap account/read completed"
+        );
         let requirements_request_id = self.next_request_id();
+        let requirements_started_at = Instant::now();
         let requirements: ConfigRequirementsReadResponse = self
             .client
             .request_typed(ClientRequest::ConfigRequirementsRead {
@@ -275,11 +281,16 @@ impl AppServerSession {
             .map_err(|err| {
                 bootstrap_request_error("configRequirements/read failed during TUI bootstrap", err)
             })?;
+        tracing::info!(
+            elapsed_ms = requirements_started_at.elapsed().as_millis(),
+            "TUI app-server bootstrap configRequirements/read completed"
+        );
         self.managed_new_thread_defaults = requirements
             .requirements
             .and_then(|requirements| requirements.models)
             .and_then(|models| models.new_thread);
         let model_request_id = self.next_request_id();
+        let model_list_started_at = Instant::now();
         let models: ModelListResponse = self
             .client
             .request_typed(ClientRequest::ModelList {
@@ -294,6 +305,10 @@ impl AppServerSession {
             .map_err(|err| {
                 bootstrap_request_error("model/list failed during TUI bootstrap", err)
             })?;
+        tracing::info!(
+            elapsed_ms = model_list_started_at.elapsed().as_millis(),
+            "TUI app-server bootstrap model/list completed"
+        );
         let available_models = models
             .data
             .into_iter()
@@ -355,6 +370,11 @@ impl AppServerSession {
             }
             None => (None, None, None, None, FeedbackAudience::External, false),
         };
+        tracing::info!(
+            elapsed_ms = started_at.elapsed().as_millis(),
+            available_model_count = available_models.len(),
+            "TUI app-server bootstrap completed"
+        );
         Ok(AppServerBootstrap {
             duration: started_at.elapsed(),
             account_email,
@@ -460,6 +480,7 @@ impl AppServerSession {
         config: &Config,
         session_start_source: Option<ThreadStartSource>,
     ) -> Result<AppServerStartedThread> {
+        let started_at = Instant::now();
         let request_id = self.next_request_id();
         let session_config = self.session_config_with_effective_service_tier(config);
         let response: ThreadStartResponse = self
@@ -477,7 +498,22 @@ impl AppServerSession {
             .map_err(|err| {
                 bootstrap_request_error("thread/start failed during TUI bootstrap", err)
             })?;
-        started_thread_from_start_response(response, config, self.thread_params_mode()).await
+        let thread_id = response.thread.id.clone();
+        tracing::info!(
+            thread_id = %thread_id,
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI app-server thread/start RPC completed"
+        );
+        let convert_started_at = Instant::now();
+        let started_thread =
+            started_thread_from_start_response(response, config, self.thread_params_mode()).await?;
+        tracing::info!(
+            thread_id = %thread_id,
+            elapsed_ms = convert_started_at.elapsed().as_millis(),
+            total_elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI app-server started thread conversion completed"
+        );
+        Ok(started_thread)
     }
 
     pub(crate) async fn resume_thread(
@@ -485,6 +521,7 @@ impl AppServerSession {
         config: Config,
         thread_id: ThreadId,
     ) -> Result<AppServerStartedThread> {
+        let started_at = Instant::now();
         let request_id = self.next_request_id();
         let session_config = self.session_config_with_effective_service_tier(&config);
         let response: ThreadResumeResponse = self
@@ -502,6 +539,22 @@ impl AppServerSession {
             .map_err(|err| {
                 bootstrap_request_error("thread/resume failed during TUI bootstrap", err)
             })?;
+        let response_thread_id = response.thread.id.clone();
+        let response_turn_count = response.thread.turns.len();
+        let initial_turns_page_count = response
+            .initial_turns_page
+            .as_ref()
+            .map(|page| page.data.len())
+            .unwrap_or(0);
+        tracing::info!(
+            thread_id = %response_thread_id,
+            ephemeral = response.thread.ephemeral,
+            turn_count = response_turn_count,
+            initial_turns_page_count,
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI app-server thread/resume RPC completed"
+        );
+        let convert_started_at = Instant::now();
         let fork_parent_title = self
             .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
             .await;
@@ -509,6 +562,12 @@ impl AppServerSession {
             started_thread_from_resume_response(response, &config, self.thread_params_mode())
                 .await?;
         started.session.fork_parent_title = fork_parent_title;
+        tracing::info!(
+            thread_id = %response_thread_id,
+            elapsed_ms = convert_started_at.elapsed().as_millis(),
+            total_elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI app-server resumed thread conversion completed"
+        );
         Ok(started)
     }
 
@@ -925,15 +984,37 @@ impl AppServerSession {
         thread_id: ThreadId,
     ) -> Result<ThreadGoalGetResponse> {
         let request_id = self.next_request_id();
-        self.client
+        let started_at = Instant::now();
+        tracing::info!(
+            request_id = ?request_id,
+            thread_id = %thread_id,
+            "TUI thread/goal/get request started"
+        );
+        let raw_result: std::result::Result<ThreadGoalGetResponse, TypedRequestError> = self
+            .client
             .request_typed(ClientRequest::ThreadGoalGet {
-                request_id,
+                request_id: request_id.clone(),
                 params: ThreadGoalGetParams {
                     thread_id: thread_id.to_string(),
                 },
             })
-            .await
-            .wrap_err("thread/goal/get failed in TUI")
+            .await;
+        tracing::info!(
+            request_id = ?request_id,
+            thread_id = %thread_id,
+            success = raw_result.is_ok(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI thread/goal/get typed result received"
+        );
+        let result = raw_result.wrap_err("thread/goal/get failed in TUI");
+        tracing::info!(
+            request_id = ?request_id,
+            thread_id = %thread_id,
+            success = result.is_ok(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI thread/goal/get request completed"
+        );
+        result
     }
 
     pub(crate) async fn thread_goal_set(
@@ -1179,6 +1260,7 @@ pub(crate) async fn start_thread_with_request_handle(
     thread_params_mode: ThreadParamsMode,
     remote_cwd_override: Option<PathBuf>,
 ) -> Result<AppServerStartedThread> {
+    let started_at = Instant::now();
     let response: ThreadStartResponse = request_handle
         .request_typed(ClientRequest::ThreadStart {
             request_id: RequestId::String(format!("startup-thread-start-{}", Uuid::new_v4())),
@@ -1191,7 +1273,22 @@ pub(crate) async fn start_thread_with_request_handle(
         })
         .await
         .map_err(|err| bootstrap_request_error("thread/start failed during TUI bootstrap", err))?;
-    started_thread_from_start_response(response, &config, thread_params_mode).await
+    let thread_id = response.thread.id.clone();
+    tracing::info!(
+        thread_id = %thread_id,
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "TUI startup thread/start RPC completed"
+    );
+    let convert_started_at = Instant::now();
+    let started_thread =
+        started_thread_from_start_response(response, &config, thread_params_mode).await?;
+    tracing::info!(
+        thread_id = %thread_id,
+        elapsed_ms = convert_started_at.elapsed().as_millis(),
+        total_elapsed_ms = started_at.elapsed().as_millis(),
+        "TUI startup started thread conversion completed"
+    );
+    Ok(started_thread)
 }
 
 pub(crate) fn status_account_display_from_auth_mode(

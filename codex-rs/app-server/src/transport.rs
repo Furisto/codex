@@ -10,6 +10,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 use tracing::warn;
 
 pub use codex_app_server_transport::AppServerTransport;
@@ -147,13 +148,34 @@ async fn send_message_to_connection(
     }
 
     let writer = connection_state.writer.clone();
+    let request_id = outgoing_message_request_id(&message).cloned();
+    if let Some(request_id) = request_id.as_ref() {
+        info!(
+            connection_id = %connection_id,
+            request_id = ?request_id,
+            writer_available_capacity = writer.capacity(),
+            writer_max_capacity = writer.max_capacity(),
+            "app-server outbound route to writer started"
+        );
+    }
     let queued_message = QueuedOutgoingMessage {
         message,
         write_complete_tx,
     };
     if connection_state.can_disconnect() {
         match writer.try_send(queued_message) {
-            Ok(()) => false,
+            Ok(()) => {
+                if let Some(request_id) = request_id.as_ref() {
+                    info!(
+                        connection_id = %connection_id,
+                        request_id = ?request_id,
+                        writer_available_capacity = writer.capacity(),
+                        writer_max_capacity = writer.max_capacity(),
+                        "app-server outbound route to writer completed"
+                    );
+                }
+                false
+            }
             Err(mpsc::error::TrySendError::Full(_)) => {
                 warn!(
                     "disconnecting slow connection after outbound queue filled: {connection_id:?}"
@@ -167,7 +189,26 @@ async fn send_message_to_connection(
     } else if writer.send(queued_message).await.is_err() {
         disconnect_connection(connections, connection_id)
     } else {
+        if let Some(request_id) = request_id.as_ref() {
+            info!(
+                connection_id = %connection_id,
+                request_id = ?request_id,
+                writer_available_capacity = writer.capacity(),
+                writer_max_capacity = writer.max_capacity(),
+                "app-server outbound route to writer completed"
+            );
+        }
         false
+    }
+}
+
+fn outgoing_message_request_id(
+    message: &OutgoingMessage,
+) -> Option<&codex_app_server_protocol::RequestId> {
+    match message {
+        OutgoingMessage::Response(response) => Some(&response.id),
+        OutgoingMessage::Error(error) => Some(&error.id),
+        OutgoingMessage::Request(_) | OutgoingMessage::AppServerNotification(_) => None,
     }
 }
 

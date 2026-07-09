@@ -16,6 +16,7 @@ use std::io::Error as IoError;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::AppServerEvent;
 use crate::RequestResult;
@@ -59,6 +60,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tracing::info;
 use tracing::warn;
 use url::Url;
 
@@ -215,6 +217,9 @@ impl RemoteAppServerClient {
         let worker_handle = tokio::spawn(async move {
             let mut pending_requests =
                 HashMap::<RequestId, oneshot::Sender<IoResult<RequestResult>>>::new();
+            let mut request_methods = HashMap::<RequestId, String>::new();
+            let mut received_message_count: u64 = 0;
+            let mut received_notification_count: u64 = 0;
             let mut worker_exit_error: Option<(ErrorKind, String)> = None;
             loop {
                 tokio::select! {
@@ -226,6 +231,7 @@ impl RemoteAppServerClient {
                         match command {
                             RemoteClientCommand::Request { request, response_tx } => {
                                 let request_id = request.id.clone();
+                                let method = request.method.clone();
                                 if pending_requests.contains_key(&request_id) {
                                     let _ = response_tx.send(Err(IoError::new(
                                         ErrorKind::InvalidInput,
@@ -234,6 +240,14 @@ impl RemoteAppServerClient {
                                     continue;
                                 }
                                 pending_requests.insert(request_id.clone(), response_tx);
+                                request_methods.insert(request_id.clone(), method.clone());
+                                let started_at = Instant::now();
+                                info!(
+                                    request_id = ?request_id,
+                                    method,
+                                    pending_request_count = pending_requests.len(),
+                                    "remote app-server client request write started"
+                                );
                                 if let Err(err) = write_jsonrpc_message(
                                     &mut stream,
                                     JSONRPCMessage::Request(*request),
@@ -248,6 +262,7 @@ impl RemoteAppServerClient {
                                     if let Some(response_tx) = pending_requests.remove(&request_id) {
                                         let _ = response_tx.send(Err(err));
                                     }
+                                    request_methods.remove(&request_id);
                                     let _ = deliver_event(
                                         &event_tx,
                                         AppServerEvent::Disconnected {
@@ -257,6 +272,13 @@ impl RemoteAppServerClient {
                                     worker_exit_error = Some((ErrorKind::BrokenPipe, message));
                                     break;
                                 }
+                                info!(
+                                    request_id = ?request_id,
+                                    method,
+                                    pending_request_count = pending_requests.len(),
+                                    elapsed_ms = started_at.elapsed().as_millis(),
+                                    "remote app-server client request write completed"
+                                );
                             }
                             RemoteClientCommand::Notify { notification, response_tx } => {
                                 let result = write_jsonrpc_message(
@@ -319,18 +341,42 @@ impl RemoteAppServerClient {
                     message = stream.next() => {
                         match message {
                             Some(Ok(Message::Text(text))) => {
+                                received_message_count += 1;
                                 match serde_json::from_str::<JSONRPCMessage>(&text) {
                                     Ok(JSONRPCMessage::Response(response)) => {
+                                        let method = request_methods
+                                            .remove(&response.id)
+                                            .unwrap_or_else(|| "<unknown>".to_string());
+                                        info!(
+                                            request_id = ?response.id,
+                                            method,
+                                            pending_request_count = pending_requests.len(),
+                                            received_message_count,
+                                            received_notification_count,
+                                            "remote app-server client response frame received"
+                                        );
                                         if let Some(response_tx) = pending_requests.remove(&response.id) {
                                             let _ = response_tx.send(Ok(Ok(response.result)));
                                         }
                                     }
                                     Ok(JSONRPCMessage::Error(error)) => {
+                                        let method = request_methods
+                                            .remove(&error.id)
+                                            .unwrap_or_else(|| "<unknown>".to_string());
+                                        info!(
+                                            request_id = ?error.id,
+                                            method,
+                                            pending_request_count = pending_requests.len(),
+                                            received_message_count,
+                                            received_notification_count,
+                                            "remote app-server client error frame received"
+                                        );
                                         if let Some(response_tx) = pending_requests.remove(&error.id) {
                                             let _ = response_tx.send(Ok(Err(error.error)));
                                         }
                                     }
                                     Ok(JSONRPCMessage::Notification(notification)) => {
+                                        received_notification_count += 1;
                                         if let Some(event) =
                                             app_server_event_from_notification(notification)
                                             && let Err(err) = deliver_event(
@@ -499,13 +545,20 @@ impl RemoteAppServerClient {
         T: DeserializeOwned,
     {
         let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
+        let started_at = Instant::now();
+        info!(method, "remote app-server client typed request started");
+        let response = self.request(request).await;
+        info!(
+            method,
+            success = response.as_ref().is_ok_and(Result::is_ok),
+            transport_success = response.is_ok(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "remote app-server client typed request raw result received"
+        );
+        let response = response.map_err(|source| TypedRequestError::Transport {
+            method: method.clone(),
+            source,
+        })?;
         let result = response.map_err(|source| TypedRequestError::Server {
             method: method.clone(),
             source,
@@ -659,13 +712,23 @@ impl RemoteAppServerRequestHandle {
         T: DeserializeOwned,
     {
         let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
+        let started_at = Instant::now();
+        info!(
+            method,
+            "remote app-server request handle typed request started"
+        );
+        let response = self.request(request).await;
+        info!(
+            method,
+            success = response.as_ref().is_ok_and(Result::is_ok),
+            transport_success = response.is_ok(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "remote app-server request handle typed request raw result received"
+        );
+        let response = response.map_err(|source| TypedRequestError::Transport {
+            method: method.clone(),
+            source,
+        })?;
         let result = response.map_err(|source| TypedRequestError::Server {
             method: method.clone(),
             source,

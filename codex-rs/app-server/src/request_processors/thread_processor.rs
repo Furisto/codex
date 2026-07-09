@@ -1211,10 +1211,15 @@ impl ThreadRequestProcessor {
     ) -> Result<(), JSONRPCErrorError> {
         let thread_start_started_at = std::time::Instant::now();
         let requested_cwd = typesafe_overrides.cwd.clone();
+        let config_load_started_at = std::time::Instant::now();
         let mut config = config_manager
             .load_with_overrides(config_overrides.clone(), typesafe_overrides.clone())
             .await
             .map_err(|err| config_load_error(&err))?;
+        tracing::info!(
+            elapsed_ms = config_load_started_at.elapsed().as_millis(),
+            "app-server thread/start config load completed"
+        );
 
         // The user may have requested WorkspaceWrite or DangerFullAccess via
         // the command line, though in the process of deriving the Config, it
@@ -1270,6 +1275,7 @@ impl ThreadRequestProcessor {
                 current_cli_overrides.as_slice()
             };
 
+            let config_reload_started_at = std::time::Instant::now();
             config = config_manager
                 .load_with_cli_overrides(
                     cli_overrides_for_reload,
@@ -1279,13 +1285,22 @@ impl ThreadRequestProcessor {
                 )
                 .await
                 .map_err(|err| config_load_error(&err))?;
+            tracing::info!(
+                elapsed_ms = config_reload_started_at.elapsed().as_millis(),
+                "app-server thread/start config reload after trust update completed"
+            );
         }
 
+        let environments_started_at = std::time::Instant::now();
         let environments = environments.unwrap_or_else(|| {
             listener_task_context
                 .thread_manager
                 .default_environment_selections(&config.cwd)
         });
+        tracing::info!(
+            elapsed_ms = environments_started_at.elapsed().as_millis(),
+            "app-server thread/start environment selection completed"
+        );
         let dynamic_tools = dynamic_tools.unwrap_or_default();
         if !dynamic_tools.is_empty() {
             validate_dynamic_tools(&dynamic_tools).map_err(invalid_request)?;
@@ -1346,15 +1361,36 @@ impl ThreadRequestProcessor {
             create_thread_started_at.elapsed(),
             Some("ready"),
         );
+        tracing::info!(
+            %thread_id,
+            dynamic_tool_count,
+            elapsed_ms = create_thread_started_at.elapsed().as_millis(),
+            total_elapsed_ms = thread_start_started_at.elapsed().as_millis(),
+            "app-server thread/start create_thread completed"
+        );
 
+        let client_info_started_at = std::time::Instant::now();
         Self::set_app_server_client_info(
             thread.as_ref(),
             app_server_client_name,
             app_server_client_version,
         )
         .await?;
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = client_info_started_at.elapsed().as_millis(),
+            "app-server thread/start set client info completed"
+        );
 
+        let instruction_sources_started_at = std::time::Instant::now();
         let instruction_sources = thread.legacy_instruction_sources().await;
+        tracing::info!(
+            %thread_id,
+            instruction_source_count = instruction_sources.len(),
+            elapsed_ms = instruction_sources_started_at.elapsed().as_millis(),
+            "app-server thread/start instruction sources loaded"
+        );
+        let config_snapshot_started_at = std::time::Instant::now();
         let config_snapshot = thread
             .config_snapshot()
             .instrument(tracing::info_span!(
@@ -1362,6 +1398,11 @@ impl ThreadRequestProcessor {
                 otel.name = "app_server.thread_start.config_snapshot",
             ))
             .await;
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = config_snapshot_started_at.elapsed().as_millis(),
+            "app-server thread/start config snapshot completed"
+        );
         let mut thread = build_thread_from_snapshot(
             thread_id,
             session_configured.session_id.to_string(),
@@ -1370,6 +1411,7 @@ impl ThreadRequestProcessor {
         );
 
         // Auto-attach a thread listener when starting a thread.
+        let attach_listener_started_at = std::time::Instant::now();
         log_listener_attach_result(
             super::thread_lifecycle::ensure_conversation_listener(
                 listener_task_context.clone(),
@@ -1387,7 +1429,13 @@ impl ThreadRequestProcessor {
             request_id.connection_id,
             "thread",
         );
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = attach_listener_started_at.elapsed().as_millis(),
+            "app-server thread/start attach listener completed"
+        );
 
+        let upsert_thread_started_at = std::time::Instant::now();
         listener_task_context
             .thread_watch_manager
             .upsert_thread_silently(thread.clone())
@@ -1396,7 +1444,13 @@ impl ThreadRequestProcessor {
                 otel.name = "app_server.thread_start.upsert_thread",
             ))
             .await;
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = upsert_thread_started_at.elapsed().as_millis(),
+            "app-server thread/start upsert thread completed"
+        );
 
+        let resolve_status_started_at = std::time::Instant::now();
         thread.status = resolve_thread_status(
             listener_task_context
                 .thread_watch_manager
@@ -1407,6 +1461,11 @@ impl ThreadRequestProcessor {
                 ))
                 .await,
             /*has_in_progress_turn*/ false,
+        );
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = resolve_status_started_at.elapsed().as_millis(),
+            "app-server thread/start resolve status completed"
         );
 
         let sandbox = thread_response_sandbox_policy(
@@ -1434,6 +1493,7 @@ impl ThreadRequestProcessor {
             multi_agent_mode: MultiAgentMode::ExplicitRequestOnly,
         };
         let notif = thread_started_notification(thread);
+        let send_response_started_at = std::time::Instant::now();
         listener_task_context
             .outgoing
             .send_response_with_thread_originator(request_id, response, thread_originator)
@@ -1442,7 +1502,13 @@ impl ThreadRequestProcessor {
                 otel.name = "app_server.thread_start.send_response",
             ))
             .await;
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = send_response_started_at.elapsed().as_millis(),
+            "app-server thread/start send response completed"
+        );
 
+        let notify_started_at = std::time::Instant::now();
         listener_task_context
             .outgoing
             .send_server_notification(ServerNotification::ThreadStarted(notif))
@@ -1451,10 +1517,20 @@ impl ThreadRequestProcessor {
                 otel.name = "app_server.thread_start.notify_started",
             ))
             .await;
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = notify_started_at.elapsed().as_millis(),
+            "app-server thread/start notify started completed"
+        );
         session_telemetry.record_startup_phase(
             "thread_start_total",
             thread_start_started_at.elapsed(),
             Some("ready"),
+        );
+        tracing::info!(
+            %thread_id,
+            elapsed_ms = thread_start_started_at.elapsed().as_millis(),
+            "app-server thread/start completed"
         );
         Ok(())
     }

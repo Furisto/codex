@@ -14,6 +14,7 @@ use crate::text_formatting::truncate_text;
 use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus;
 use codex_protocol::ThreadId;
+use std::time::Instant;
 
 const EPHEMERAL_THREAD_GOAL_ERROR_MESSAGE: &str = concat!(
     "Goals need a saved session. This session is temporary.\n",
@@ -56,7 +57,14 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
+        let started_at = Instant::now();
         let result = app_server.thread_goal_get(thread_id).await;
+        tracing::info!(
+            thread_id = %thread_id,
+            success = result.is_ok(),
+            elapsed_ms = started_at.elapsed().as_millis(),
+            "TUI startup resume paused-goal check completed"
+        );
         if self.current_displayed_thread_id() != Some(thread_id) {
             return;
         }
