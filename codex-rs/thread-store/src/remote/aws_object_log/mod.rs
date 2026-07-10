@@ -859,6 +859,26 @@ impl AwsObjectLogThreadStore {
             snapshot_elapsed_ms = Some(elapsed_ms(snapshot_started_at));
             expected_seq = snapshot.seq + 1;
             items.extend(snapshot_items);
+            if snapshot.seq == head.head_seq {
+                tracing::info!(
+                    thread_id = %head.thread_id,
+                    head_seq = head.head_seq,
+                    has_snapshot = true,
+                    snapshot_item_count,
+                    snapshot_elapsed_ms,
+                    total_commit_count = 0,
+                    skipped_commit_count = 0,
+                    loaded_commit_count = 0,
+                    loaded_commit_item_count = 0,
+                    query_commit_pointers_skipped = true,
+                    query_commit_pointers_elapsed_ms = 0,
+                    commit_payloads_elapsed_ms = 0,
+                    history_item_count = items.len(),
+                    elapsed_ms = elapsed_ms(started_at),
+                    "AWS object-log load_items_for_head completed"
+                );
+                return Ok(items);
+            }
         }
         let query_started_at = Instant::now();
         let commits = self.query_commit_pointers(head.thread_id).await?;
@@ -927,6 +947,7 @@ impl AwsObjectLogThreadStore {
             skipped_commit_count,
             loaded_commit_count,
             loaded_commit_item_count,
+            query_commit_pointers_skipped = false,
             query_commit_pointers_elapsed_ms = query_elapsed_ms,
             commit_payloads_elapsed_ms = commit_payload_elapsed_ms,
             history_item_count = items.len(),
