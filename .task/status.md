@@ -609,11 +609,42 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after enabling Tokio runtime support; no lockfile content changed.
 
+### 25. App-server watch startup and lifecycle notification delivery
+
+Commit: `61f59a8025 Deliver environment provider lifecycle events` (pushed to
+`ts/env-provider`)
+
+- Added a process-scoped app-server worker that cursor-lists all configured provider definitions at
+  startup and starts their dynamic watch tasks.
+- Hooked provider create, PAT update, and successful provider deletion into watch start,
+  stop/invalidate/restart, and stop behavior respectively; name-only updates leave the watch
+  untouched.
+- Routed explicit environment creation through the same bounded lifecycle stream as provider
+  reconciliation and watch events.
+- Maintained one non-durable app-server projection for notification normalization: first sightings
+  emit `environment/created`, changed complete records emit `environment/updated`, identical
+  records are suppressed, and known removals emit `environment/deleted` with the canonical
+  qualified ID.
+- This shared projection suppresses the duplicate created notification that would otherwise occur
+  when reconciliation observes the record returned by `environment/create`.
+- Added process shutdown handling for watch tasks and event delivery.
+- Added normalization coverage for explicit create, duplicate reconciliation, phase update,
+  deletion, and duplicate deletion.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 32/32 passed after adding explicit event publishing.
+- `just fix -p codex-environment-provider` passed.
+- `cargo check -p codex-app-server --lib` passed.
+- `cargo clippy -p codex-app-server --lib --no-deps -- -D warnings` passed.
+- The focused app-server unit test and `just fix -p codex-app-server` remain blocked before running
+  this code by unrelated existing `thread_processor_tests.rs` errors: the stale `SandboxMode` path
+  and three `JSONRPCErrorError` conversions to `anyhow::Error`.
+
 ## Next work
 
-1. Attach configured provider watches to app-server startup and lifecycle notification delivery.
-2. Implement execution projection, provider connectors, and PAT-driven watch/connector
+1. Implement execution projection and provider connectors, including PAT-driven connector
    replacement.
-3. Finish the Ona event stream.
+2. Finish the Ona event stream.
 
 This file will be updated after each subsequent milestone is committed.
