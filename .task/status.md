@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and seven
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and eight
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -237,11 +237,41 @@ Verification:
 - `just test -p codex-app-server-protocol`: 254/254 passed.
 - `just fix -p codex-app-server-protocol` passed.
 
+### 11. App-server provider create, update, and list APIs
+
+Commit: `cb14d874a0 Expose environment provider configuration APIs`
+
+- Registered experimental v2 methods `environmentProvider/create`, `update`, and `list` with
+  global write/read serialization scopes.
+- Initialized one process-scoped provider configuration service from the local state database and
+  platform keyring; when state is unavailable the service remains static-only.
+- Wired create and update through URL/default validation, PAT encryption, immutable-field policy,
+  and redacted responses.
+- Wired list through the service-owned cursor that merges the fixed static provider with dynamic
+  store pagination, with API limits clamped to 1–100 and a default of 50.
+- Mapped validation, conflicts, missing providers, storage failures, credential failures, and
+  internal corruption into app-server request/internal error categories.
+- Updated the app-server README and regenerated schemas in experimental and stable modes.
+- Added end-to-end JSON-RPC coverage for static/dynamic listing, persisted definition mapping,
+  rename-only update, and static create rejection before keyring access.
+
+Verification:
+
+- `just test -p codex-app-server-protocol`: 254/254 passed after method registration.
+- `cargo check -p codex-app-server --lib` passed.
+- The two targeted `environment_provider` app-server integration tests passed after temporarily
+  adding the unrelated missing `config_snapshot: None` initializer in `remote_thread_store.rs`;
+  that temporary edit was removed afterward.
+- Scoped fixes passed for `codex-app-server-protocol` and `codex-environment-provider`.
+- App-server `just fix` remains blocked by the previously documented unrelated
+  `thread_processor_tests.rs` and `remote_thread_store.rs` compilation errors.
+- `just bazel-lock-update` passed.
+
 ## Next work
 
-1. Register and wire experimental `environmentProvider/create`, `update`, and `list` through the
-   provider configuration service.
-2. Add the provider adapter cleanup abstraction, then register `environmentProvider/delete` with
-   the accepted normal and force semantics.
+1. Add the provider adapter cleanup abstraction and fake-provider coverage for normal fail-closed
+   and forced complete/partial/unknown deletion outcomes.
+2. Register and wire experimental `environmentProvider/delete` only after that cleanup policy is
+   enforced above definition deletion.
 
 This file will be updated after each subsequent milestone is committed.
