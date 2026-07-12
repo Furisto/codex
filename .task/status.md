@@ -341,10 +341,37 @@ Verification:
 - App-server `just fix` remains blocked by the previously documented unrelated
   `thread_processor_tests.rs` and `remote_thread_store.rs` compilation errors.
 
+### 15. Environment lifecycle API payloads
+
+Commit: `b4f15db1d1 Define environment lifecycle API payloads`
+
+- Added the common provider-qualified environment reference, structured repository source with a
+  required opaque Git ref, provider-native resource class, lifecycle phase, and status payloads.
+- Added one environment response shape shared by dynamic and static environments; static records
+  represent source and resource class as `null` and use the common status model.
+- Added experimental v2 payload definitions for environment create, read, cursor-paginated list,
+  and asynchronous delete.
+- Kept dynamic create inputs provider-independent and required: provider ID, source, and resource
+  class, with no provider-specific options.
+- Made create return only the provider-qualified environment reference and delete return an empty
+  success response.
+- Added created/updated notification payloads carrying complete records and a deleted payload
+  carrying the canonical qualified environment ID.
+- Kept the payloads unregistered until executable lifecycle handlers and notification delivery are
+  present, so schema fixtures correctly remain unchanged in this milestone.
+
+Verification:
+
+- `just test -p codex-app-server-protocol`: 256/256 passed.
+- `just fix -p codex-app-server-protocol` passed.
+- Experimental and stable schema generation both completed and confirmed no unregistered surface
+  was exported.
+
 ## Next work
 
-1. Define delivery stage 3 environment lifecycle API payloads.
-2. Add runtime orchestration and a fake adapter for create/read/list/delete behavior.
-3. Implement the Ona adapter and replace the no-adapter app-server deletion factory.
+1. Add runtime lifecycle orchestration over provider configuration and adapters.
+2. Wire create/read/list/delete APIs and notifications with fake-adapter integration coverage.
+3. Add reconciliation/watch ownership and execution projection integration.
+4. Implement the Ona adapter and replace the no-adapter app-server factory.
 
 This file will be updated after each subsequent milestone is committed.
