@@ -11,11 +11,14 @@ use crate::EnvironmentProviderAdapter;
 use crate::EnvironmentProviderAdapterError;
 use crate::EnvironmentProviderAdapterFactory;
 use crate::EnvironmentProviderAdapterFuture;
+use crate::EnvironmentProviderAdapterPool;
 use crate::EnvironmentProviderCleanup;
 use crate::EnvironmentProviderCleanupStatus;
 use crate::EnvironmentProviderService;
 use crate::EnvironmentProviderServiceError;
 use crate::ListEnvironmentsParams;
+use crate::ProviderOperationLocks;
+use crate::ResolveEnvironmentProviderAdapterError;
 use crate::ResolvedEnvironmentProviderDefinition;
 use crate::STATIC_ENVIRONMENT_PROVIDER_ID;
 
@@ -45,7 +48,8 @@ pub enum EnvironmentProviderDeletionError {
 #[derive(Clone)]
 pub struct EnvironmentProviderDeletionService {
     configuration: EnvironmentProviderService,
-    adapter_factory: Arc<dyn EnvironmentProviderAdapterFactory>,
+    adapters: EnvironmentProviderAdapterPool,
+    operation_locks: ProviderOperationLocks,
 }
 
 impl std::fmt::Debug for EnvironmentProviderDeletionService {
@@ -62,9 +66,22 @@ impl EnvironmentProviderDeletionService {
         configuration: EnvironmentProviderService,
         adapter_factory: Arc<dyn EnvironmentProviderAdapterFactory>,
     ) -> Self {
+        let adapters = EnvironmentProviderAdapterPool::new(
+            configuration.clone(),
+            Arc::clone(&adapter_factory),
+        );
+        Self::from_runtime(configuration, adapters, ProviderOperationLocks::default())
+    }
+
+    pub(crate) fn from_runtime(
+        configuration: EnvironmentProviderService,
+        adapters: EnvironmentProviderAdapterPool,
+        operation_locks: ProviderOperationLocks,
+    ) -> Self {
         Self {
             configuration,
-            adapter_factory,
+            adapters,
+            operation_locks,
         }
     }
 
@@ -87,6 +104,7 @@ impl EnvironmentProviderDeletionService {
             }
             .into());
         }
+        let _guard = self.operation_locks.lock(&params.provider_id).await;
         match params.mode {
             DeleteEnvironmentProviderMode::Normal => {
                 self.delete_provider_normally(params.provider_id).await
@@ -101,15 +119,11 @@ impl EnvironmentProviderDeletionService {
         &self,
         provider_id: String,
     ) -> EnvironmentProviderDeletionServiceResult<EnvironmentProviderCleanup> {
-        let definition = self
-            .configuration
-            .resolve_provider(provider_id.clone())
-            .await?;
         let adapter = self
-            .adapter_factory
-            .create_adapter(definition)
+            .adapters
+            .adapter(&provider_id)
             .await
-            .map_err(cleanup_unavailable)?;
+            .map_err(deletion_adapter_unavailable)?;
         let page = adapter
             .list_environments(ListEnvironmentsParams {
                 cursor: None,
@@ -121,8 +135,9 @@ impl EnvironmentProviderDeletionService {
             return Err(EnvironmentProviderDeletionError::ProviderNotEmpty { provider_id });
         }
         self.configuration
-            .delete_provider_definition_after_cleanup(provider_id)
+            .delete_provider_definition_after_cleanup(provider_id.clone())
             .await?;
+        self.adapters.invalidate(&provider_id);
         Ok(EnvironmentProviderCleanup {
             status: EnvironmentProviderCleanupStatus::Complete,
             failed_environment_ids: Vec::new(),
@@ -133,13 +148,11 @@ impl EnvironmentProviderDeletionService {
         &self,
         provider_id: String,
     ) -> EnvironmentProviderDeletionServiceResult<EnvironmentProviderCleanup> {
-        let adapter = match self
-            .configuration
-            .resolve_provider(provider_id.clone())
-            .await
-        {
-            Ok(definition) => self.adapter_factory.create_adapter(definition).await.ok(),
-            Err(EnvironmentProviderServiceError::ProviderNotFound { provider_id }) => {
+        let adapter = match self.adapters.adapter(&provider_id).await {
+            Ok(adapter) => Some(adapter),
+            Err(ResolveEnvironmentProviderAdapterError::Configuration(
+                EnvironmentProviderServiceError::ProviderNotFound { provider_id },
+            )) => {
                 return Err(
                     EnvironmentProviderServiceError::ProviderNotFound { provider_id }.into(),
                 );
@@ -163,8 +176,9 @@ impl EnvironmentProviderDeletionService {
         };
 
         self.configuration
-            .delete_provider_definition_after_cleanup(provider_id)
+            .delete_provider_definition_after_cleanup(provider_id.clone())
             .await?;
+        self.adapters.invalidate(&provider_id);
         Ok(EnvironmentProviderCleanup {
             status,
             failed_environment_ids,
@@ -232,6 +246,17 @@ async fn delete_environments(
 fn cleanup_unavailable(error: EnvironmentProviderAdapterError) -> EnvironmentProviderDeletionError {
     EnvironmentProviderDeletionError::CleanupUnavailable {
         message: error.to_string(),
+    }
+}
+
+fn deletion_adapter_unavailable(
+    error: ResolveEnvironmentProviderAdapterError,
+) -> EnvironmentProviderDeletionError {
+    match error {
+        ResolveEnvironmentProviderAdapterError::Configuration(error) => {
+            EnvironmentProviderDeletionError::Configuration(error)
+        }
+        ResolveEnvironmentProviderAdapterError::Adapter(error) => cleanup_unavailable(error),
     }
 }
 

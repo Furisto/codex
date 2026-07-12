@@ -1,9 +1,11 @@
 //! Storage-neutral domain and persistence boundaries for environment providers.
 
 mod adapter;
+mod adapter_pool;
 mod deletion;
 mod error;
 mod local;
+mod operation_locks;
 mod service;
 mod service_error;
 mod store;
@@ -61,3 +63,7 @@ pub use types::ResolvedEnvironmentProviderDefinition;
 pub use types::StoredEnvironmentProviderAuthentication;
 pub use types::UpdateEnvironmentProviderParams;
 pub use types::normalize_environment_provider_name;
+
+use adapter_pool::EnvironmentProviderAdapterPool;
+use adapter_pool::ResolveEnvironmentProviderAdapterError;
+use operation_locks::ProviderOperationLocks;
