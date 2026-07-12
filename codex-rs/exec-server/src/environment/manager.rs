@@ -284,6 +284,19 @@ impl EnvironmentManager {
             .cloned()
     }
 
+    /// Returns every registered canonical environment ID in stable lexical order.
+    pub fn environment_ids(&self) -> Vec<String> {
+        let mut environment_ids = self
+            .environments
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        environment_ids.sort();
+        environment_ids
+    }
+
     /// Adds or replaces a named remote environment without changing the
     /// manager's default environment selection. Uses the default WebSocket
     /// connection timeout when none is provided.

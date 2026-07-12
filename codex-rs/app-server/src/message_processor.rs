@@ -23,6 +23,7 @@ use crate::request_processors::AppsRequestProcessor;
 use crate::request_processors::CatalogRequestProcessor;
 use crate::request_processors::CommandExecRequestProcessor;
 use crate::request_processors::ConfigRequestProcessor;
+use crate::request_processors::EnvironmentLifecycleRequestProcessor;
 use crate::request_processors::EnvironmentRequestProcessor;
 use crate::request_processors::ExternalAgentConfigRequestProcessor;
 use crate::request_processors::ExternalAgentConfigRequestProcessorArgs;
@@ -69,6 +70,7 @@ use codex_arg0::Arg0DispatchPaths;
 use codex_chatgpt::workspace_settings;
 use codex_core::ThreadManager;
 use codex_core::config::Config;
+use codex_environment_provider::EnvironmentLifecycleService;
 use codex_environment_provider::EnvironmentProviderService;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
@@ -194,6 +196,7 @@ pub(crate) struct MessageProcessor {
     command_exec_processor: CommandExecRequestProcessor,
     process_exec_processor: ProcessExecRequestProcessor,
     config_processor: ConfigRequestProcessor,
+    environment_lifecycle_processor: EnvironmentLifecycleRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
     external_agent_config_processor: ExternalAgentConfigRequestProcessor,
     feedback_processor: FeedbackRequestProcessor,
@@ -345,6 +348,8 @@ impl MessageProcessor {
                 EnvironmentProviderService::new_local_static_only(config.codex_home.to_path_buf())
             }
         };
+        let environment_lifecycle_service =
+            EnvironmentLifecycleService::without_adapters(environment_provider_service.clone());
         let environment_manager_for_requests = Arc::clone(&environment_manager);
         let environment_manager_for_extensions = Arc::clone(&environment_manager);
         let restriction_product = session_source.restriction_product();
@@ -553,6 +558,12 @@ impl MessageProcessor {
         let environment_processor = EnvironmentRequestProcessor::new(
             thread_manager.environment_manager(),
             environment_provider_service,
+            environment_lifecycle_service.clone(),
+        );
+        let environment_lifecycle_processor = EnvironmentLifecycleRequestProcessor::new(
+            thread_manager.environment_manager(),
+            environment_lifecycle_service,
+            outgoing.clone(),
         );
         let fs_processor = FsRequestProcessor::new(
             Arc::clone(&environment_manager_for_requests),
@@ -574,6 +585,7 @@ impl MessageProcessor {
             command_exec_processor,
             process_exec_processor,
             config_processor,
+            environment_lifecycle_processor,
             environment_processor,
             external_agent_config_processor,
             feedback_processor,
@@ -1051,6 +1063,18 @@ impl MessageProcessor {
             }
             ClientRequest::EnvironmentInfo { params, .. } => {
                 self.environment_processor.environment_info(params).await
+            }
+            ClientRequest::EnvironmentCreate { params, .. } => {
+                self.environment_lifecycle_processor.create(params).await
+            }
+            ClientRequest::EnvironmentRead { params, .. } => {
+                self.environment_lifecycle_processor.read(params).await
+            }
+            ClientRequest::EnvironmentList { params, .. } => {
+                self.environment_lifecycle_processor.list(params).await
+            }
+            ClientRequest::EnvironmentDelete { params, .. } => {
+                self.environment_lifecycle_processor.delete(params).await
             }
             ClientRequest::EnvironmentProviderCreate { params, .. } => {
                 self.environment_processor.provider_create(params).await

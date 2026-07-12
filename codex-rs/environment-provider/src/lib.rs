@@ -68,6 +68,7 @@ pub use types::StoredEnvironmentProviderAuthentication;
 pub use types::UpdateEnvironmentProviderParams;
 pub use types::normalize_environment_provider_name;
 
+use adapter::UnavailableEnvironmentProviderAdapterFactory;
 use adapter_pool::EnvironmentProviderAdapterPool;
 use adapter_pool::ResolveEnvironmentProviderAdapterError;
 use operation_locks::ProviderOperationLocks;

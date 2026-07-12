@@ -15,6 +15,7 @@ use crate::ProviderOperationLocks;
 use crate::ReadEnvironmentParams;
 use crate::ResolveEnvironmentProviderAdapterError;
 use crate::STATIC_ENVIRONMENT_PROVIDER_ID;
+use crate::UnavailableEnvironmentProviderAdapterFactory;
 
 /// Result returned by dynamic environment lifecycle orchestration.
 pub type EnvironmentLifecycleServiceResult<T> = Result<T, EnvironmentLifecycleServiceError>;
@@ -53,6 +54,14 @@ impl EnvironmentLifecycleService {
             adapters,
             operation_locks: ProviderOperationLocks::default(),
         }
+    }
+
+    /// Creates lifecycle orchestration that reports dynamic adapters as unavailable.
+    pub fn without_adapters(configuration: EnvironmentProviderService) -> Self {
+        Self::new(
+            configuration,
+            Arc::new(UnavailableEnvironmentProviderAdapterFactory),
+        )
     }
 
     /// Creates provider-deletion orchestration sharing adapters and mutation serialization.

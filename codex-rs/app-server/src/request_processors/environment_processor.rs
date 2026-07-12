@@ -13,6 +13,7 @@ use codex_app_server_protocol::EnvironmentProviderUpdateParams;
 use codex_app_server_protocol::EnvironmentProviderUpdateResponse;
 use codex_environment_provider::DeleteEnvironmentProviderMode;
 use codex_environment_provider::DeleteEnvironmentProviderParams as DomainDeleteEnvironmentProviderParams;
+use codex_environment_provider::EnvironmentLifecycleService;
 use codex_environment_provider::EnvironmentProvider as DomainEnvironmentProvider;
 use codex_environment_provider::EnvironmentProviderAuthentication as DomainEnvironmentProviderAuthentication;
 use codex_environment_provider::EnvironmentProviderAuthenticationInput;
@@ -35,6 +36,7 @@ const MAX_PROVIDER_LIST_LIMIT: usize = 100;
 pub(crate) struct EnvironmentRequestProcessor {
     environment_manager: Arc<EnvironmentManager>,
     environment_provider_service: EnvironmentProviderService,
+    environment_lifecycle_service: EnvironmentLifecycleService,
     environment_provider_deletion_service: EnvironmentProviderDeletionService,
 }
 
@@ -42,14 +44,14 @@ impl EnvironmentRequestProcessor {
     pub(crate) fn new(
         environment_manager: Arc<EnvironmentManager>,
         environment_provider_service: EnvironmentProviderService,
+        environment_lifecycle_service: EnvironmentLifecycleService,
     ) -> Self {
         let environment_provider_deletion_service =
-            EnvironmentProviderDeletionService::without_adapters(
-                environment_provider_service.clone(),
-            );
+            environment_lifecycle_service.deletion_service();
         Self {
             environment_manager,
             environment_provider_service,
+            environment_lifecycle_service,
             environment_provider_deletion_service,
         }
     }
@@ -122,6 +124,8 @@ impl EnvironmentRequestProcessor {
         &self,
         params: EnvironmentProviderUpdateParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let authentication_changed = params.authentication.is_some();
+        let provider_id = params.provider_id.clone();
         let authentication = params
             .authentication
             .map(domain_provider_authentication)
@@ -135,6 +139,10 @@ impl EnvironmentRequestProcessor {
             })
             .await
             .map_err(provider_service_error)?;
+        if authentication_changed {
+            self.environment_lifecycle_service
+                .invalidate_provider(&provider_id);
+        }
         Ok(Some(
             EnvironmentProviderUpdateResponse {
                 provider: api_provider(provider),
@@ -243,7 +251,7 @@ fn api_provider(provider: DomainEnvironmentProvider) -> ApiEnvironmentProvider {
     }
 }
 
-fn provider_service_error(error: EnvironmentProviderServiceError) -> JSONRPCErrorError {
+pub(super) fn provider_service_error(error: EnvironmentProviderServiceError) -> JSONRPCErrorError {
     match error {
         EnvironmentProviderServiceError::ProviderNotFound { .. }
         | EnvironmentProviderServiceError::NameConflict { .. }

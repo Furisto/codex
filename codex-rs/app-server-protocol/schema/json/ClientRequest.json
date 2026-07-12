@@ -790,6 +790,23 @@
         }
       ]
     },
+    "EnvironmentSource": {
+      "description": "Structured source used to provision a dynamic environment.",
+      "properties": {
+        "ref": {
+          "description": "Opaque provider-interpreted Git ref.",
+          "type": "string"
+        },
+        "repositoryUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "repositoryUrl"
+      ],
+      "type": "object"
+    },
     "ExperimentalFeatureEnablementSetParams": {
       "properties": {
         "enablement": {

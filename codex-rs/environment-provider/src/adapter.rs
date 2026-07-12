@@ -91,3 +91,19 @@ pub trait EnvironmentProviderAdapterFactory: Send + Sync {
         definition: ResolvedEnvironmentProviderDefinition,
     ) -> EnvironmentProviderAdapterFuture<'_, Arc<dyn EnvironmentProviderAdapter>>;
 }
+
+#[derive(Debug)]
+pub(crate) struct UnavailableEnvironmentProviderAdapterFactory;
+
+impl EnvironmentProviderAdapterFactory for UnavailableEnvironmentProviderAdapterFactory {
+    fn create_adapter(
+        &self,
+        _definition: ResolvedEnvironmentProviderDefinition,
+    ) -> EnvironmentProviderAdapterFuture<'_, Arc<dyn EnvironmentProviderAdapter>> {
+        Box::pin(async {
+            Err(EnvironmentProviderAdapterError::Unavailable {
+                message: "no adapter is implemented for this provider kind".to_string(),
+            })
+        })
+    }
+}

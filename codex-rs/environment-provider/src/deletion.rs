@@ -10,7 +10,6 @@ use crate::DeleteEnvironmentProviderParams;
 use crate::EnvironmentProviderAdapter;
 use crate::EnvironmentProviderAdapterError;
 use crate::EnvironmentProviderAdapterFactory;
-use crate::EnvironmentProviderAdapterFuture;
 use crate::EnvironmentProviderAdapterPool;
 use crate::EnvironmentProviderCleanup;
 use crate::EnvironmentProviderCleanupStatus;
@@ -19,8 +18,8 @@ use crate::EnvironmentProviderServiceError;
 use crate::ListEnvironmentsParams;
 use crate::ProviderOperationLocks;
 use crate::ResolveEnvironmentProviderAdapterError;
-use crate::ResolvedEnvironmentProviderDefinition;
 use crate::STATIC_ENVIRONMENT_PROVIDER_ID;
+use crate::UnavailableEnvironmentProviderAdapterFactory;
 
 const CLEANUP_LIST_PAGE_SIZE: usize = 100;
 const CLEANUP_DELETE_CONCURRENCY: usize = 8;
@@ -90,7 +89,10 @@ impl EnvironmentProviderDeletionService {
     /// Normal deletion fails closed. Forced deletion reports unknown cleanup and still attempts to
     /// remove the provider definition.
     pub fn without_adapters(configuration: EnvironmentProviderService) -> Self {
-        Self::new(configuration, Arc::new(UnavailableAdapterFactory))
+        Self::new(
+            configuration,
+            Arc::new(UnavailableEnvironmentProviderAdapterFactory),
+        )
     }
 
     /// Deletes a provider definition according to normal or forced cleanup policy.
@@ -257,22 +259,6 @@ fn deletion_adapter_unavailable(
             EnvironmentProviderDeletionError::Configuration(error)
         }
         ResolveEnvironmentProviderAdapterError::Adapter(error) => cleanup_unavailable(error),
-    }
-}
-
-#[derive(Debug)]
-struct UnavailableAdapterFactory;
-
-impl EnvironmentProviderAdapterFactory for UnavailableAdapterFactory {
-    fn create_adapter(
-        &self,
-        _definition: ResolvedEnvironmentProviderDefinition,
-    ) -> EnvironmentProviderAdapterFuture<'_, Arc<dyn EnvironmentProviderAdapter>> {
-        Box::pin(async {
-            Err(EnvironmentProviderAdapterError::Unavailable {
-                message: "no adapter is implemented for this provider kind".to_string(),
-            })
-        })
     }
 }
 

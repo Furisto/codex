@@ -964,6 +964,34 @@ client_request_definitions! {
         serialization: global("environment-provider"),
         response: v2::EnvironmentProviderDeleteResponse,
     },
+    #[experimental("environment/create")]
+    /// Starts asynchronous environment provisioning through a dynamic provider.
+    EnvironmentCreate => "environment/create" {
+        params: v2::EnvironmentCreateParams,
+        serialization: None,
+        response: v2::EnvironmentCreateResponse,
+    },
+    #[experimental("environment/read")]
+    /// Reads an authoritative environment record from its provider.
+    EnvironmentRead => "environment/read" {
+        params: v2::EnvironmentReadParams,
+        serialization: None,
+        response: v2::EnvironmentReadResponse,
+    },
+    #[experimental("environment/list")]
+    /// Lists authoritative environments from one provider.
+    EnvironmentList => "environment/list" {
+        params: v2::EnvironmentListParams,
+        serialization: None,
+        response: v2::EnvironmentListResponse,
+    },
+    #[experimental("environment/delete")]
+    /// Requests asynchronous environment deletion through a dynamic provider.
+    EnvironmentDelete => "environment/delete" {
+        params: v2::EnvironmentDeleteParams,
+        serialization: None,
+        response: v2::EnvironmentDeleteResponse,
+    },
     #[experimental("environment/add")]
     /// Adds or replaces a remote environment by id for later selection.
     EnvironmentAdd => "environment/add" {
@@ -1687,6 +1715,12 @@ server_notification_definitions! {
     ExternalAgentConfigImportProgress => "externalAgentConfig/import/progress" (v2::ExternalAgentConfigImportProgressNotification),
     ExternalAgentConfigImportCompleted => "externalAgentConfig/import/completed" (v2::ExternalAgentConfigImportCompletedNotification),
     FsChanged => "fs/changed" (v2::FsChangedNotification),
+    #[experimental("environment/created")]
+    EnvironmentCreated => "environment/created" (v2::EnvironmentCreatedNotification),
+    #[experimental("environment/updated")]
+    EnvironmentUpdated => "environment/updated" (v2::EnvironmentUpdatedNotification),
+    #[experimental("environment/deleted")]
+    EnvironmentDeleted => "environment/deleted" (v2::EnvironmentDeletedNotification),
     ReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta" (v2::ReasoningSummaryTextDeltaNotification),
     ReasoningSummaryPartAdded => "item/reasoning/summaryPartAdded" (v2::ReasoningSummaryPartAddedNotification),
     ReasoningTextDelta => "item/reasoning/textDelta" (v2::ReasoningTextDeltaNotification),

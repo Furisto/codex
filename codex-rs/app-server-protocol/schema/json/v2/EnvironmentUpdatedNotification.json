@@ -1,0 +1,115 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Environment": {
+      "description": "An environment visible through the app-server API.",
+      "properties": {
+        "ref": {
+          "$ref": "#/definitions/EnvironmentRef"
+        },
+        "resourceClass": {
+          "description": "Provider-native size or machine class, or `null` for a static environment.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EnvironmentSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provisioning source, or `null` for a statically registered environment."
+        },
+        "status": {
+          "$ref": "#/definitions/EnvironmentStatus"
+        }
+      },
+      "required": [
+        "ref",
+        "status"
+      ],
+      "type": "object"
+    },
+    "EnvironmentPhase": {
+      "description": "Common environment lifecycle phases.",
+      "enum": [
+        "unknown",
+        "creating",
+        "starting",
+        "running",
+        "updating",
+        "stopping",
+        "stopped",
+        "deleting",
+        "deleted"
+      ],
+      "type": "string"
+    },
+    "EnvironmentRef": {
+      "description": "Provider-qualified identity of an environment.",
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "providerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environmentId",
+        "providerId"
+      ],
+      "type": "object"
+    },
+    "EnvironmentSource": {
+      "description": "Structured source used to provision a dynamic environment.",
+      "properties": {
+        "ref": {
+          "description": "Opaque provider-interpreted Git ref.",
+          "type": "string"
+        },
+        "repositoryUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref",
+        "repositoryUrl"
+      ],
+      "type": "object"
+    },
+    "EnvironmentStatus": {
+      "description": "Current environment lifecycle status.",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "phase": {
+          "$ref": "#/definitions/EnvironmentPhase"
+        }
+      },
+      "required": [
+        "phase"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "environment": {
+      "$ref": "#/definitions/Environment"
+    }
+  },
+  "required": [
+    "environment"
+  ],
+  "title": "EnvironmentUpdatedNotification",
+  "type": "object"
+}

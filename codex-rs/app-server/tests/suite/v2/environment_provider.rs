@@ -3,6 +3,9 @@ use std::time::Duration;
 use anyhow::Result;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
+use codex_app_server_protocol::Environment;
+use codex_app_server_protocol::EnvironmentListResponse;
+use codex_app_server_protocol::EnvironmentPhase;
 use codex_app_server_protocol::EnvironmentProvider;
 use codex_app_server_protocol::EnvironmentProviderAuthentication;
 use codex_app_server_protocol::EnvironmentProviderCleanup;
@@ -11,6 +14,9 @@ use codex_app_server_protocol::EnvironmentProviderDeleteResponse;
 use codex_app_server_protocol::EnvironmentProviderKind as ApiEnvironmentProviderKind;
 use codex_app_server_protocol::EnvironmentProviderListResponse;
 use codex_app_server_protocol::EnvironmentProviderUpdateResponse;
+use codex_app_server_protocol::EnvironmentReadResponse;
+use codex_app_server_protocol::EnvironmentRef;
+use codex_app_server_protocol::EnvironmentStatus;
 use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
@@ -211,4 +217,132 @@ async fn provider_force_delete_reports_unknown_without_adapter_and_removes_defin
         }
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn static_environment_read_and_cursor_list_use_lifecycle_shape() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    std::fs::write(
+        codex_home.path().join("environments.toml"),
+        r#"
+default = "none"
+include_local = false
+
+[[environments]]
+id = "zeta"
+url = "ws://127.0.0.1:1"
+
+[[environments]]
+id = "alpha"
+url = "ws://127.0.0.1:2"
+"#,
+    )?;
+    let mut app_server = TestAppServer::new(codex_home.path()).await?;
+    timeout(RPC_TIMEOUT, app_server.initialize()).await??;
+
+    let first_request_id = app_server
+        .send_raw_request(
+            "environment/list",
+            Some(json!({"providerId": "static", "cursor": null, "limit": 1})),
+        )
+        .await?;
+    let first_response: JSONRPCResponse = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(first_request_id)),
+    )
+    .await??;
+    let first_page = to_response::<EnvironmentListResponse>(first_response)?;
+    let next_cursor = first_page
+        .next_cursor
+        .clone()
+        .expect("first static page should have a cursor");
+    assert_eq!(
+        first_page,
+        EnvironmentListResponse {
+            data: vec![static_environment("alpha")],
+            next_cursor: Some(next_cursor.clone()),
+        }
+    );
+
+    let second_request_id = app_server
+        .send_raw_request(
+            "environment/list",
+            Some(json!({
+                "providerId": "static",
+                "cursor": next_cursor,
+                "limit": 1,
+            })),
+        )
+        .await?;
+    let second_response: JSONRPCResponse = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(second_request_id)),
+    )
+    .await??;
+    assert_eq!(
+        to_response::<EnvironmentListResponse>(second_response)?,
+        EnvironmentListResponse {
+            data: vec![static_environment("zeta")],
+            next_cursor: None,
+        }
+    );
+
+    let read_request_id = app_server
+        .send_raw_request(
+            "environment/read",
+            Some(json!({"providerId": "static", "environmentId": "zeta"})),
+        )
+        .await?;
+    let read_response: JSONRPCResponse = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(read_request_id)),
+    )
+    .await??;
+    assert_eq!(
+        to_response::<EnvironmentReadResponse>(read_response)?,
+        EnvironmentReadResponse {
+            environment: static_environment("zeta"),
+        }
+    );
+
+    for (method, params, expected_message) in [
+        (
+            "environment/create",
+            json!({
+                "providerId": "static",
+                "source": {"repositoryUrl": "https://example.com/repo", "ref": "main"},
+                "resourceClass": "large",
+            }),
+            "invalid environment provider request: static environments cannot be created through this API",
+        ),
+        (
+            "environment/delete",
+            json!({"providerId": "static", "environmentId": "zeta"}),
+            "invalid environment provider request: static environments cannot be deleted through this API",
+        ),
+    ] {
+        let request_id = app_server.send_raw_request(method, Some(params)).await?;
+        let error: JSONRPCError = timeout(
+            RPC_TIMEOUT,
+            app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
+        )
+        .await??;
+        assert_eq!(error.error.message, expected_message);
+    }
+    Ok(())
+}
+
+fn static_environment(environment_id: &str) -> Environment {
+    Environment {
+        environment_ref: EnvironmentRef {
+            provider_id: "static".to_string(),
+            environment_id: environment_id.to_string(),
+        },
+        source: None,
+        resource_class: None,
+        status: EnvironmentStatus {
+            phase: EnvironmentPhase::Running,
+            error: None,
+        },
+    }
 }

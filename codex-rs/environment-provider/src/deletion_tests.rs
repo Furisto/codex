@@ -16,6 +16,7 @@ use crate::CreateEnvironmentParams;
 use crate::Environment;
 use crate::EnvironmentListPage;
 use crate::EnvironmentPhase;
+use crate::EnvironmentProviderAdapterFuture;
 use crate::EnvironmentProviderAuthenticationInput;
 use crate::EnvironmentProviderKind;
 use crate::EnvironmentProviderServiceCreateParams;
@@ -27,6 +28,7 @@ use crate::EnvironmentStatus;
 use crate::LocalEnvironmentProviderStore;
 use crate::PersonalAccessToken;
 use crate::ReadEnvironmentParams;
+use crate::ResolvedEnvironmentProviderDefinition;
 
 struct TestFixture {
     configuration: EnvironmentProviderService,
