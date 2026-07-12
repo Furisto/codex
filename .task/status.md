@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and three
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and four
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -146,11 +146,30 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after the crate dependency changes.
 
+### 7. Provider credential encryption
+
+Commit: `a370d74fc7 Encrypt environment provider credentials`
+
+- Added `EnvironmentProviderCredentialCipher` to `codex-secrets`.
+- Reused the existing age/scrypt encryption path and random 256-bit key generation.
+- Stored the encryption key under a dedicated `environment-provider-credentials|<home-hash>` OS
+  keyring account, separate from the managed-secrets key.
+- Returned caller-owned ciphertext with an explicit format version; the cipher itself does not
+  persist provider configuration or ciphertext.
+- Decryption requires the existing key and never silently creates a replacement key.
+- Keyring load/save errors, missing keys, unsupported versions, and invalid ciphertext fail closed.
+- Added coverage proving randomized ciphertext round trips, plaintext is absent from ciphertext
+  and keyring values, missing-key behavior, keyring failures, and version rejection.
+
+Verification:
+
+- `just test -p codex-secrets`: 11/11 passed.
+- `just fix -p codex-secrets` passed.
+
 ## Next work
 
-1. Add caller-owned PAT encryption in `codex-secrets`, with the encryption key stored separately
-   from provider ciphertext.
-2. Add static provider synthesis and provider CRUD APIs in
-   separately committed logical milestones.
+1. Add provider service orchestration that encrypts PAT input, decrypts credentials only for
+   authenticated provider operations, and synthesizes the fixed static provider.
+2. Add experimental app-server v2 provider CRUD APIs in a separate logical milestone.
 
 This file will be updated after each subsequent milestone is committed.
