@@ -183,6 +183,37 @@ pub struct EnvironmentProviderListPage {
     pub next_cursor: Option<String>,
 }
 
+/// Provider-definition deletion behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeleteEnvironmentProviderMode {
+    /// Reject deletion unless the provider can be queried and has no environments.
+    Normal,
+    /// Best-effort delete discovered environments, then remove the definition regardless.
+    Force,
+}
+
+/// Provider-definition deletion input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeleteEnvironmentProviderParams {
+    pub provider_id: String,
+    pub mode: DeleteEnvironmentProviderMode,
+}
+
+/// Result of provider-owned environment cleanup during definition deletion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentProviderCleanup {
+    pub status: EnvironmentProviderCleanupStatus,
+    pub failed_environment_ids: Vec<String>,
+}
+
+/// Completeness of provider-owned environment cleanup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnvironmentProviderCleanupStatus {
+    Complete,
+    Partial,
+    Unknown,
+}
+
 /// A dynamic provider definition with decrypted authentication for provider operations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedEnvironmentProviderDefinition {

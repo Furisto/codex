@@ -1,6 +1,7 @@
 //! Storage-neutral domain and persistence boundaries for environment providers.
 
 mod adapter;
+mod deletion;
 mod error;
 mod local;
 mod service;
@@ -14,6 +15,9 @@ pub use adapter::EnvironmentProviderAdapterFactory;
 pub use adapter::EnvironmentProviderAdapterFuture;
 pub use adapter::EnvironmentProviderAdapterResult;
 pub use adapter::EnvironmentProviderWatch;
+pub use deletion::EnvironmentProviderDeletionError;
+pub use deletion::EnvironmentProviderDeletionService;
+pub use deletion::EnvironmentProviderDeletionServiceResult;
 pub use error::EnvironmentProviderStoreError;
 pub use error::EnvironmentProviderStoreResult;
 pub use local::LocalEnvironmentProviderStore;
@@ -28,6 +32,8 @@ pub use store::EnvironmentProviderStoreFuture;
 pub use types::CreateEnvironmentParams;
 pub use types::CreateEnvironmentProviderParams;
 pub use types::DeleteEnvironmentParams;
+pub use types::DeleteEnvironmentProviderMode;
+pub use types::DeleteEnvironmentProviderParams;
 pub use types::EncryptedEnvironmentProviderCredential;
 pub use types::Environment;
 pub use types::EnvironmentListPage;
@@ -35,6 +41,8 @@ pub use types::EnvironmentPhase;
 pub use types::EnvironmentProvider;
 pub use types::EnvironmentProviderAuthentication;
 pub use types::EnvironmentProviderAuthenticationInput;
+pub use types::EnvironmentProviderCleanup;
+pub use types::EnvironmentProviderCleanupStatus;
 pub use types::EnvironmentProviderDefinition;
 pub use types::EnvironmentProviderEvent;
 pub use types::EnvironmentProviderKind;
