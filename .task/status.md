@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and five
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and six
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -183,10 +183,42 @@ Verification:
 
 - `just test -p codex-environment-provider`: 5/5 passed for the domain/store-only commit.
 
+### 9. Provider configuration service orchestration
+
+Commit: `1098b48543 Orchestrate environment provider configuration`
+
+- Added `EnvironmentProviderService` over an optional storage-neutral provider store and the
+  provider credential cipher.
+- Synthesized the fixed `static` provider with ID `static`, display name `Static`, and null URL and
+  authentication.
+- Kept static provider listing available when dynamic storage is absent or unavailable; dynamic
+  CRUD fails with a typed storage-unavailable error.
+- Resolved the Ona default URL to `https://app.gitpod.io/api`, validated absolute HTTP(S) URLs, and
+  normalized trailing path slashes without contacting the provider.
+- Encrypted PATs before passing definitions to persistence and returned only redacted PAT metadata.
+- Decrypted PATs only through `resolve_provider`, the boundary intended for authenticated provider
+  operations.
+- Implemented provider-list pagination across the synthesized static row and store-owned dynamic
+  keyset cursors.
+- Allowed only name and PAT replacement, and made keyring failures block PAT changes while leaving
+  rename-only updates available.
+- Exposed definition deletion only as a post-cleanup operation; provider adapter orchestration must
+  enforce normal and forced environment cleanup before calling it.
+- Added coverage for static-only operation, URL/default validation, encrypted persistence with no
+  plaintext PAT in SQLite files, credential resolution, immutable URL/kind behavior, pagination,
+  static mutation rejection, and keyring failure behavior.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 11/11 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after the crate dependency changes.
+
 ## Next work
 
-1. Complete and commit provider service orchestration that encrypts PAT input, decrypts credentials
-   only for authenticated provider operations, and synthesizes the fixed static provider.
-2. Add experimental app-server v2 provider CRUD APIs in a separate logical milestone.
+1. Add the experimental app-server v2 provider request/response types and method registration,
+   including tagged PAT input and redacted output.
+2. Wire create, update, and list through the configuration service; wire delete after the provider
+   adapter cleanup abstraction is in place.
 
 This file will be updated after each subsequent milestone is committed.
