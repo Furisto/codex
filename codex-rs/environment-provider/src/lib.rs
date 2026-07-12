@@ -2,6 +2,7 @@
 
 mod error;
 mod local;
+mod service;
 mod service_error;
 mod store;
 mod types;
@@ -9,6 +10,10 @@ mod types;
 pub use error::EnvironmentProviderStoreError;
 pub use error::EnvironmentProviderStoreResult;
 pub use local::LocalEnvironmentProviderStore;
+pub use service::EnvironmentProviderService;
+pub use service::ONA_DEFAULT_URL;
+pub use service::STATIC_ENVIRONMENT_PROVIDER_ID;
+pub use service::STATIC_ENVIRONMENT_PROVIDER_NAME;
 pub use service_error::EnvironmentProviderServiceError;
 pub use service_error::EnvironmentProviderServiceResult;
 pub use store::EnvironmentProviderStore;

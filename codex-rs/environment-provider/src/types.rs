@@ -62,7 +62,7 @@ pub struct EnvironmentProvider {
     pub authentication: Option<EnvironmentProviderAuthentication>,
 }
 
-/// Provider creation input accepted by the provider configuration service.
+/// Provider creation input accepted by [`crate::EnvironmentProviderService`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnvironmentProviderServiceCreateParams {
     /// Unique display name.
@@ -75,7 +75,7 @@ pub struct EnvironmentProviderServiceCreateParams {
     pub authentication: EnvironmentProviderAuthenticationInput,
 }
 
-/// Provider update input accepted by the provider configuration service.
+/// Provider update input accepted by [`crate::EnvironmentProviderService`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EnvironmentProviderServiceUpdateParams {
     /// Stable provider ID.
