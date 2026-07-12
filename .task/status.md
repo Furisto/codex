@@ -391,11 +391,36 @@ Verification:
 - `just bazel-lock-update` passed after promoting Tokio synchronization support to a runtime
   dependency; no lockfile content changed.
 
+### 17. Dynamic environment lifecycle orchestration
+
+Commit: `7e93d2aee2 Orchestrate environment lifecycle operations`
+
+- Added `EnvironmentLifecycleService` for authoritative dynamic create, read, cursor list, and
+  asynchronous delete operations.
+- Routed all operations through the shared one-adapter-per-provider pool, while reads and lists
+  always call the provider instead of consulting a local projection.
+- Serialized environment create and delete with provider deletion through the same per-provider
+  mutation lock domain.
+- Returned the provider's complete initial record from create so app-server orchestration can
+  project it, emit a created notification, and return only its reference to the client.
+- Rejected static create/delete before adapter resolution; static reads/lists remain an app-server
+  routing concern over the existing environment manager.
+- Validated that every create/read/list record is owned by the requested provider definition and
+  treated mismatches as invalid provider responses.
+- Exposed adapter invalidation for PAT replacement and provider removal, and made lifecycle-created
+  provider deletion share the same cached adapter and locks.
+- Added fake-adapter coverage for parameter routing, authoritative records and cursors, adapter
+  reuse, explicit invalidation, and shared provider deletion.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 20/20 passed.
+- `just fix -p codex-environment-provider` passed.
+
 ## Next work
 
-1. Add runtime lifecycle orchestration over the shared provider adapters and mutation locks.
-2. Wire create/read/list/delete APIs and notifications with fake-adapter integration coverage.
-3. Add reconciliation/watch ownership and execution projection integration.
-4. Implement the Ona adapter and replace the no-adapter app-server factory.
+1. Wire create/read/list/delete APIs and notifications with fake-adapter integration coverage.
+2. Add reconciliation/watch ownership and execution projection integration.
+3. Implement the Ona adapter and replace the no-adapter app-server factory.
 
 This file will be updated after each subsequent milestone is committed.
