@@ -745,6 +745,51 @@
         }
       ]
     },
+    "EnvironmentProviderAuthenticationParams": {
+      "description": "Authentication supplied when creating or updating an environment provider.",
+      "oneOf": [
+        {
+          "description": "Personal Access Token authentication.",
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pat"
+              ],
+              "title": "PatEnvironmentProviderAuthenticationParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "token",
+            "type"
+          ],
+          "title": "PatEnvironmentProviderAuthenticationParams",
+          "type": "object"
+        }
+      ]
+    },
+    "EnvironmentProviderKind": {
+      "description": "Supported environment provider kinds.",
+      "oneOf": [
+        {
+          "description": "The single built-in provider for statically registered environments.",
+          "enum": [
+            "static"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "An Ona environment provider.",
+          "enum": [
+            "ona"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ExperimentalFeatureEnablementSetParams": {
       "properties": {
         "enablement": {

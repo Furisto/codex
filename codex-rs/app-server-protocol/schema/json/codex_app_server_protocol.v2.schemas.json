@@ -5243,6 +5243,111 @@
         }
       ]
     },
+    "EnvironmentProvider": {
+      "description": "An environment provider visible through the app-server API.",
+      "properties": {
+        "authentication": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EnvironmentProviderAuthentication"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Redacted authentication metadata, or `null` for the built-in static provider."
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/EnvironmentProviderKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "description": "Resolved control-plane URL, or `null` for the built-in static provider.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "type": "object"
+    },
+    "EnvironmentProviderAuthentication": {
+      "description": "Redacted environment provider authentication metadata.",
+      "oneOf": [
+        {
+          "description": "Personal Access Token authentication is configured.",
+          "properties": {
+            "type": {
+              "enum": [
+                "pat"
+              ],
+              "title": "PatEnvironmentProviderAuthenticationType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "PatEnvironmentProviderAuthentication",
+          "type": "object"
+        }
+      ]
+    },
+    "EnvironmentProviderAuthenticationParams": {
+      "description": "Authentication supplied when creating or updating an environment provider.",
+      "oneOf": [
+        {
+          "description": "Personal Access Token authentication.",
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "pat"
+              ],
+              "title": "PatEnvironmentProviderAuthenticationParamsType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "token",
+            "type"
+          ],
+          "title": "PatEnvironmentProviderAuthenticationParams",
+          "type": "object"
+        }
+      ]
+    },
+    "EnvironmentProviderKind": {
+      "description": "Supported environment provider kinds.",
+      "oneOf": [
+        {
+          "description": "The single built-in provider for statically registered environments.",
+          "enum": [
+            "static"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "An Ona environment provider.",
+          "enum": [
+            "ona"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ErrorNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {

@@ -1,7 +1,9 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_secrets::EnvironmentProviderCredentialCipher;
 use codex_secrets::EnvironmentProviderCredentialCiphertext;
+use codex_state::StateRuntime;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
@@ -21,6 +23,7 @@ use crate::EnvironmentProviderServiceUpdateParams;
 use crate::EnvironmentProviderStore;
 use crate::EnvironmentProviderStoreError;
 use crate::ListEnvironmentProvidersParams;
+use crate::LocalEnvironmentProviderStore;
 use crate::PersonalAccessToken;
 use crate::ResolvedEnvironmentProviderDefinition;
 use crate::StoredEnvironmentProviderAuthentication;
@@ -47,6 +50,19 @@ impl std::fmt::Debug for EnvironmentProviderService {
 }
 
 impl EnvironmentProviderService {
+    /// Creates a provider service using the local state database and platform keyring.
+    pub fn new_local(codex_home: PathBuf, state_db: Arc<StateRuntime>) -> Self {
+        Self::new(
+            Arc::new(LocalEnvironmentProviderStore::new(state_db)),
+            EnvironmentProviderCredentialCipher::new(codex_home),
+        )
+    }
+
+    /// Creates a static-only local service when the state database is unavailable.
+    pub fn new_local_static_only(codex_home: PathBuf) -> Self {
+        Self::static_only(EnvironmentProviderCredentialCipher::new(codex_home))
+    }
+
     /// Creates a provider service with dynamic provider persistence.
     pub fn new(
         store: Arc<dyn EnvironmentProviderStore>,

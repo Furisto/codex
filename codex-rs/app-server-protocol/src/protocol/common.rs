@@ -936,6 +936,27 @@ client_request_definitions! {
         serialization: None,
         response: v2::MockExperimentalMethodResponse,
     },
+    #[experimental("environmentProvider/create")]
+    /// Creates a persisted dynamic environment provider definition.
+    EnvironmentProviderCreate => "environmentProvider/create" {
+        params: v2::EnvironmentProviderCreateParams,
+        serialization: global("environment-provider"),
+        response: v2::EnvironmentProviderCreateResponse,
+    },
+    #[experimental("environmentProvider/update")]
+    /// Updates the name or authentication of a dynamic environment provider.
+    EnvironmentProviderUpdate => "environmentProvider/update" {
+        params: v2::EnvironmentProviderUpdateParams,
+        serialization: global("environment-provider"),
+        response: v2::EnvironmentProviderUpdateResponse,
+    },
+    #[experimental("environmentProvider/list")]
+    /// Lists the built-in static provider and persisted dynamic providers.
+    EnvironmentProviderList => "environmentProvider/list" {
+        params: v2::EnvironmentProviderListParams,
+        serialization: global_shared_read("environment-provider"),
+        response: v2::EnvironmentProviderListResponse,
+    },
     #[experimental("environment/add")]
     /// Adds or replaces a remote environment by id for later selection.
     EnvironmentAdd => "environment/add" {
