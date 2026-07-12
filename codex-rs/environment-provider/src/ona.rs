@@ -24,6 +24,60 @@ pub(crate) struct OnaCreateEnvironmentRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct OnaCreateEnvironmentResponse {
+    pub(crate) environment: OnaEnvironment,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaGetEnvironmentRequest {
+    pub(crate) environment_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaGetEnvironmentResponse {
+    pub(crate) environment: OnaEnvironment,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaListEnvironmentsRequest {
+    pub(crate) pagination: OnaPaginationRequest,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaListEnvironmentsResponse {
+    #[serde(default)]
+    pub(crate) environments: Vec<OnaEnvironment>,
+    #[serde(default)]
+    pub(crate) pagination: OnaPaginationResponse,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaPaginationRequest {
+    pub(crate) page_size: usize,
+    pub(crate) token: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaPaginationResponse {
+    #[serde(default)]
+    pub(crate) next_token: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaDeleteEnvironmentRequest {
+    pub(crate) environment_id: String,
+    pub(crate) force: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct OnaEnvironment {
     id: String,
     #[serde(default)]
