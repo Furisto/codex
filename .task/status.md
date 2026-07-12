@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and two
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and three
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -124,11 +124,33 @@ Verification:
 - `just test -p codex-state`: 152/152 passed.
 - `just fix -p codex-state` passed.
 
+### 6. Local environment provider store
+
+Commit: `fa889ba931 Implement local environment provider store`
+
+- Implemented `LocalEnvironmentProviderStore` over an initialized `StateRuntime`.
+- Mapped provider kinds and tagged authentication between the storage-neutral domain and state
+  rows without exposing plaintext credential fields.
+- Added opaque JSON keyset cursors and limit validation for provider listing.
+- Mapped missing providers, duplicate normalized names, invalid cursors, storage unavailability,
+  and corrupt persisted discriminants into typed store errors.
+- Preserved immutable IDs, kinds, and URLs by exposing only name and authentication through the
+  update path.
+- Added coverage for complete-record CRUD round trips, credential replacement, case-insensitive
+  create/update conflicts, cursor pagination and ordering, invalid cursors, and rejection of the
+  synthesized static provider.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 5/5 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after the crate dependency changes.
+
 ## Next work
 
-1. Complete and commit the `LocalEnvironmentProviderStore` adapter and its CRUD, conflict, and
-   cursor-pagination coverage.
-2. Add encrypted PAT storage support, static provider synthesis, and provider CRUD APIs in
+1. Add caller-owned PAT encryption in `codex-secrets`, with the encryption key stored separately
+   from provider ciphertext.
+2. Add static provider synthesis and provider CRUD APIs in
    separately committed logical milestones.
 
 This file will be updated after each subsequent milestone is committed.
