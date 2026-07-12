@@ -563,13 +563,33 @@ Verification:
 - `just bazel-lock-update` passed after adding Reqwest and Wiremock dependencies; Cargo lock
   membership was refreshed and the Bazel lockfile required no content change.
 
+### 23. App-server Ona lifecycle activation
+
+Commit: `6b4a67cdb9 Enable Ona lifecycle APIs in app server` (pushed to
+`ts/env-provider`)
+
+- Replaced the app-server's placeholder no-adapter lifecycle service with the concrete Ona adapter
+  factory.
+- Dynamic `environment/create`, `environment/read`, `environment/list`, and `environment/delete`
+  requests now resolve persisted Ona providers and execute through their authenticated control
+  plane adapter.
+- Provider deletion cleanup now uses the same authoritative Ona adapter pool instead of failing
+  because no dynamic adapter factory was registered.
+- Kept static environment handling unchanged and isolated from the dynamic provider adapter path.
+
+Verification:
+
+- `cargo check -p codex-app-server --lib` passed.
+- The attempted spawned-process API test reached provider creation but cannot run in this test
+  environment because its OS keyring is unavailable; no test-only credential injection hook was
+  added. Ona HTTP authentication and lifecycle mapping remain covered by the 30 passing
+  `codex-environment-provider` tests from milestone 22.
+
 ## Next work
 
-1. Replace the no-adapter app-server factory with the Ona factory and add end-to-end dynamic API
-   coverage.
-2. Add process-scoped watch task ownership and lifecycle event delivery.
-3. Implement execution projection, provider connectors, and PAT-driven watch/connector
+1. Add process-scoped watch task ownership and lifecycle event delivery.
+2. Implement execution projection, provider connectors, and PAT-driven watch/connector
    replacement.
-4. Finish the Ona event stream.
+3. Finish the Ona event stream.
 
 This file will be updated after each subsequent milestone is committed.
