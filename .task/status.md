@@ -508,11 +508,38 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after enabling Tokio time support; no lockfile content changed.
 
+### 21. Ona lifecycle wire and domain mapping
+
+Commit: `fe15306333 Map Ona environment lifecycle records` (pushed to `ts/env-provider`)
+
+- Added typed serde models for the Ona environment fields needed by the common lifecycle adapter,
+  following the local `environment.proto` protobuf-JSON shapes.
+- Mapped common create source/resource class into Ona's running desired phase, machine class, and
+  Git initializer.
+- Interpreted explicit head/tag refs and commit-like hashes inside the Ona adapter while treating
+  other opaque refs as branches; no provider-specific public API options were added.
+- Annotated create requests with `openai.com/codex-provider-id=<providerId>` for ownership filtering
+  and a separate Codex source-ref annotation so the client's original opaque ref survives Ona's
+  target-mode representation.
+- Mapped owned Ona records back into complete common environment records, including provider-native
+  ID, repository source, original ref, resource class, lifecycle phase, and combined failure text.
+- Failed closed for foreign resources and malformed owned records instead of leaking unrelated Ona
+  environments or synthesizing incomplete state.
+- Added coverage for exact create JSON, annotation mapping, source-ref round trips, phase/error
+  mapping, local ownership filtering, and malformed-resource rejection.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 28/28 passed before the final lint-only enum rename.
+- `just test -p codex-environment-provider -E 'test(ona::tests)'`: 3/3 passed after the rename.
+- `just fix -p codex-environment-provider` passed without warnings.
+
 ## Next work
 
-1. Add process-scoped watch task ownership and lifecycle event delivery.
-2. Implement execution projection, provider connectors, and PAT-driven watch/connector
+1. Add the Ona Connect HTTP client for create/read/list/delete and local post-filter pagination.
+2. Add process-scoped watch task ownership and lifecycle event delivery.
+3. Implement execution projection, provider connectors, and PAT-driven watch/connector
    replacement.
-3. Implement the Ona adapter and replace the no-adapter app-server factory.
+4. Finish the Ona event stream and replace the no-adapter app-server factory.
 
 This file will be updated after each subsequent milestone is committed.
