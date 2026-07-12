@@ -3062,8 +3062,13 @@ dependencies = [
 name = "codex-environment-provider"
 version = "0.0.0"
 dependencies = [
+ "codex-state",
  "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

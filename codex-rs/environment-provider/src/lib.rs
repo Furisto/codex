@@ -1,11 +1,13 @@
 //! Storage-neutral domain and persistence boundaries for environment providers.
 
 mod error;
+mod local;
 mod store;
 mod types;
 
 pub use error::EnvironmentProviderStoreError;
 pub use error::EnvironmentProviderStoreResult;
+pub use local::LocalEnvironmentProviderStore;
 pub use store::EnvironmentProviderStore;
 pub use store::EnvironmentProviderStoreFuture;
 pub use types::CreateEnvironmentProviderParams;
