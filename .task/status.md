@@ -4,8 +4,8 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and the
-first milestone from delivery stage 2 in `.task/plan.md` has been completed and committed.
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and two
+milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
 
@@ -105,10 +105,29 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after installing the repository-pinned Bazelisk launcher.
 
+### 5. State persistence for provider definitions
+
+Commit: `a9048da3c3 Persist environment provider definitions in state`
+
+- Added state migration `0041_environment_providers.sql`.
+- Persisted opaque provider ID, display and normalized names, kind, resolved URL, authentication
+  kind, credential format version, and ciphertext.
+- Added `StateRuntime` primitives for create, read, keyset-ordered list, atomic mutable-field
+  update, and delete.
+- Provider IDs are generated as UUIDs by the local storage backend.
+- The normalized-name unique index is the transactional authority for case-insensitive name
+  conflicts, including concurrent updates.
+- Credential versions are constrained to the `u32` range in SQLite.
+
+Verification:
+
+- `just test -p codex-state`: 152/152 passed.
+- `just fix -p codex-state` passed.
+
 ## Next work
 
-1. Add the state migration and local provider-definition store implementation, including
-   case-insensitive uniqueness and cursor pagination.
+1. Complete and commit the `LocalEnvironmentProviderStore` adapter and its CRUD, conflict, and
+   cursor-pagination coverage.
 2. Add encrypted PAT storage support, static provider synthesis, and provider CRUD APIs in
    separately committed logical milestones.
 
