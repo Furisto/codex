@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and four
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and five
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -166,10 +166,27 @@ Verification:
 - `just test -p codex-secrets`: 11/11 passed.
 - `just fix -p codex-secrets` passed.
 
+### 8. Provider configuration service domain
+
+Commit: `729987c352 Define environment provider service domain`
+
+- Added the user-visible provider model shared by static and dynamic definitions.
+- Added redacted authentication metadata and a PAT input wrapper whose debug representation never
+  exposes its value.
+- Added create, update, cursor-page, and resolved authenticated provider types for the
+  configuration service boundary.
+- Added typed service errors for not-found, case-insensitive name conflicts, invalid input and
+  cursors, unavailable storage, unavailable credentials, and corrupt internal state.
+- Mapped storage-neutral store errors into the service error model without losing their category.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 5/5 passed for the domain/store-only commit.
+
 ## Next work
 
-1. Add provider service orchestration that encrypts PAT input, decrypts credentials only for
-   authenticated provider operations, and synthesizes the fixed static provider.
+1. Complete and commit provider service orchestration that encrypts PAT input, decrypts credentials
+   only for authenticated provider operations, and synthesizes the fixed static provider.
 2. Add experimental app-server v2 provider CRUD APIs in a separate logical milestone.
 
 This file will be updated after each subsequent milestone is committed.
