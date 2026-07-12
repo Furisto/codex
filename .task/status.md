@@ -417,10 +417,48 @@ Verification:
 - `just test -p codex-environment-provider`: 20/20 passed.
 - `just fix -p codex-environment-provider` passed.
 
+### 18. App-server environment lifecycle APIs
+
+Commit: `4aec29a398 Expose environment lifecycle APIs` (pushed to `ts/env-provider`)
+
+- Registered experimental v2 `environment/create`, `read`, `list`, and `delete` methods and
+  dispatched them through a dedicated lifecycle request processor.
+- Registered experimental `environment/created`, `updated`, and `deleted` notification shapes;
+  successful dynamic creation immediately emits the complete created record and returns only its
+  provider-qualified reference.
+- Mapped dynamic API requests to the shared lifecycle service, preserving provider-native cursors
+  and all common status phases and errors.
+- Added a process-scoped unavailable adapter factory as the explicit placeholder until the Ona
+  implementation is installed; dynamic lifecycle operations fail clearly while static behavior
+  and provider configuration remain available.
+- Made PAT updates invalidate the cached authenticated adapter, while rename-only updates leave it
+  running; provider deletion now shares the lifecycle adapter and mutation lock domain.
+- Added stable, lexically ordered environment ID snapshots to `EnvironmentManager`.
+- Implemented static `environment/read` and cursor-paginated `environment/list` over the live
+  manager, returning nullable source/resource class and a running status. Static create/delete are
+  rejected before adapter access.
+- Updated the app-server README and regenerated stable and experimental schema fixtures.
+- Added end-to-end JSON-RPC coverage for static read, multi-page opaque cursor listing, lifecycle
+  response shapes, and static create/delete rejection.
+
+Verification:
+
+- `just test -p codex-app-server-protocol`: 256/256 passed.
+- `just test -p codex-environment-provider`: 20/20 passed.
+- `just test -p codex-exec-server -E 'test(environment)'`: 64/64 passed.
+- `cargo check -p codex-app-server --lib` passed.
+- All four targeted `environment_provider` app-server integration tests passed after temporarily
+  adding the unrelated missing `config_snapshot: None` initializer in `remote_thread_store.rs`;
+  that temporary edit was removed afterward.
+- Scoped fixes passed for `codex-app-server-protocol`, `codex-environment-provider`, and
+  `codex-exec-server`.
+- App-server `just fix` remains blocked by the previously documented unrelated
+  `thread_processor_tests.rs` compilation errors.
+
 ## Next work
 
-1. Wire create/read/list/delete APIs and notifications with fake-adapter integration coverage.
-2. Add reconciliation/watch ownership and execution projection integration.
+1. Add reconciliation/watch ownership, lifecycle notification delivery, and execution projection.
+2. Implement provider connector integration and PAT-driven watch/connector replacement.
 3. Implement the Ona adapter and replace the no-adapter app-server factory.
 
 This file will be updated after each subsequent milestone is committed.
