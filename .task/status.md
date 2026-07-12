@@ -4,8 +4,9 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and eight
-milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete. Provider
+storage/API work from delivery stage 2 is in progress, with the generic adapter boundary now also
+started as a prerequisite for safe provider deletion.
 
 ## Completed milestones
 
@@ -267,10 +268,29 @@ Verification:
   `thread_processor_tests.rs` and `remote_thread_store.rs` compilation errors.
 - `just bazel-lock-update` passed.
 
+### 12. Generic environment provider adapter contract
+
+Commit: `a6df07b5cd Define environment provider adapter contract`
+
+- Added a documented `EnvironmentProviderAdapter` trait with explicit `Send` futures for dynamic
+  environment create, read, provider-owned cursor list, delete, and the provider's single watch.
+- Added a documented adapter factory from a persisted definition with decrypted authentication.
+- Added common dynamic-environment domain records for qualified references, structured repository
+  source and opaque Git ref, provider-native resource class, status, and Ona-aligned phases.
+- Added provider event signals that carry resource IDs so orchestration can perform authoritative
+  reads and reconciliation instead of leaking vendor event payloads.
+- Kept provider-native pagination cursors behind the adapter boundary.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 11/11 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after adding the stream dependency.
+
 ## Next work
 
-1. Add the provider adapter cleanup abstraction and fake-provider coverage for normal fail-closed
-   and forced complete/partial/unknown deletion outcomes.
+1. Add provider deletion orchestration over the adapter contract with fake-provider coverage for
+   normal fail-closed and forced complete/partial/unknown outcomes.
 2. Register and wire experimental `environmentProvider/delete` only after that cleanup policy is
    enforced above definition deletion.
 
