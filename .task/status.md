@@ -367,9 +367,33 @@ Verification:
 - Experimental and stable schema generation both completed and confirmed no unregistered surface
   was exported.
 
+### 16. Shared provider runtime adapters and mutation locks
+
+Commit: `8c23a59013 Share environment provider runtime adapters`
+
+- Added a runtime adapter pool that lazily resolves provider credentials, constructs exactly one
+  adapter per provider definition, and shares concurrent initialization attempts.
+- Added explicit adapter invalidation so PAT replacement and provider removal can retire cached
+  authenticated adapters.
+- Added per-provider asynchronous mutation locks with independent concurrency across provider IDs
+  and no permanently retained lock entries.
+- Moved provider deletion onto the shared adapter pool and held its provider mutation lock across
+  authoritative enumeration, cleanup, and definition removal.
+- Invalidated the cached adapter only after normal or forced provider-definition deletion
+  succeeds, preserving retry behavior when storage removal fails.
+- Kept the existing public deletion-service constructors and cleanup semantics intact while adding
+  a crate-private constructor for lifecycle orchestration to share the same pool and locks.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 18/18 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after promoting Tokio synchronization support to a runtime
+  dependency; no lockfile content changed.
+
 ## Next work
 
-1. Add runtime lifecycle orchestration over provider configuration and adapters.
+1. Add runtime lifecycle orchestration over the shared provider adapters and mutation locks.
 2. Wire create/read/list/delete APIs and notifications with fake-adapter integration coverage.
 3. Add reconciliation/watch ownership and execution projection integration.
 4. Implement the Ona adapter and replace the no-adapter app-server factory.
