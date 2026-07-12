@@ -7,6 +7,94 @@ pub enum EnvironmentProviderKind {
     Ona,
 }
 
+/// Provider-qualified identity of a dynamic environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentRef {
+    pub provider_id: String,
+    pub environment_id: String,
+}
+
+/// Structured source used to provision an environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentSource {
+    pub repository_url: String,
+    /// Opaque provider-interpreted Git ref.
+    pub git_ref: String,
+}
+
+/// Common environment lifecycle phases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnvironmentPhase {
+    Unknown,
+    Creating,
+    Starting,
+    Running,
+    Updating,
+    Stopping,
+    Stopped,
+    Deleting,
+    Deleted,
+}
+
+/// Current common environment lifecycle status.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentStatus {
+    pub phase: EnvironmentPhase,
+    pub error: Option<String>,
+}
+
+/// Minimal authoritative environment record returned by provider adapters.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Environment {
+    pub environment_ref: EnvironmentRef,
+    pub source: EnvironmentSource,
+    /// Opaque provider-native size or machine class.
+    pub resource_class: String,
+    pub status: EnvironmentStatus,
+}
+
+/// Common environment provisioning input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateEnvironmentParams {
+    pub source: EnvironmentSource,
+    pub resource_class: String,
+}
+
+/// Common environment read input using a provider-native ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadEnvironmentParams {
+    pub environment_id: String,
+}
+
+/// Common environment deletion input using a provider-native ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeleteEnvironmentParams {
+    pub environment_id: String,
+}
+
+/// Provider-owned cursor pagination input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListEnvironmentsParams {
+    pub cursor: Option<String>,
+    pub limit: usize,
+}
+
+/// Provider-owned cursor page of authoritative environments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentListPage {
+    pub data: Vec<Environment>,
+    pub next_cursor: Option<String>,
+}
+
+/// Resource signal emitted by a provider watch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnvironmentProviderEvent {
+    /// The environment should be read to obtain its latest complete record.
+    Changed { environment_id: String },
+    /// The provider reports that the environment has been deleted.
+    Deleted { environment_id: String },
+}
+
 /// A Personal Access Token whose debug representation never exposes its value.
 #[derive(Clone, PartialEq, Eq)]
 pub struct PersonalAccessToken(String);
