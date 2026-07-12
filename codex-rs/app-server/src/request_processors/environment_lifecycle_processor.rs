@@ -5,7 +5,6 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use codex_app_server_protocol::Environment as ApiEnvironment;
 use codex_app_server_protocol::EnvironmentCreateParams;
 use codex_app_server_protocol::EnvironmentCreateResponse;
-use codex_app_server_protocol::EnvironmentCreatedNotification;
 use codex_app_server_protocol::EnvironmentDeleteParams;
 use codex_app_server_protocol::EnvironmentDeleteResponse;
 use codex_app_server_protocol::EnvironmentListParams;
@@ -19,11 +18,13 @@ use codex_app_server_protocol::EnvironmentStatus as ApiEnvironmentStatus;
 use codex_environment_provider::CreateEnvironmentParams as DomainCreateEnvironmentParams;
 use codex_environment_provider::DeleteEnvironmentParams as DomainDeleteEnvironmentParams;
 use codex_environment_provider::Environment as DomainEnvironment;
+use codex_environment_provider::EnvironmentLifecycleEvent;
 use codex_environment_provider::EnvironmentLifecycleService;
 use codex_environment_provider::EnvironmentLifecycleServiceError;
 use codex_environment_provider::EnvironmentPhase as DomainEnvironmentPhase;
 use codex_environment_provider::EnvironmentProviderAdapterError;
 use codex_environment_provider::EnvironmentSource as DomainEnvironmentSource;
+use codex_environment_provider::EnvironmentWatchManager;
 use codex_environment_provider::ListEnvironmentsParams as DomainListEnvironmentsParams;
 use codex_environment_provider::ReadEnvironmentParams as DomainReadEnvironmentParams;
 use codex_exec_server::STATIC_ENVIRONMENT_PROVIDER_ID;
@@ -38,19 +39,19 @@ const MAX_ENVIRONMENT_LIST_LIMIT: usize = 100;
 pub(crate) struct EnvironmentLifecycleRequestProcessor {
     environment_manager: Arc<EnvironmentManager>,
     lifecycle: EnvironmentLifecycleService,
-    outgoing: Arc<OutgoingMessageSender>,
+    watches: EnvironmentWatchManager,
 }
 
 impl EnvironmentLifecycleRequestProcessor {
     pub(crate) fn new(
         environment_manager: Arc<EnvironmentManager>,
         lifecycle: EnvironmentLifecycleService,
-        outgoing: Arc<OutgoingMessageSender>,
+        watches: EnvironmentWatchManager,
     ) -> Self {
         Self {
             environment_manager,
             lifecycle,
-            outgoing,
+            watches,
         }
     }
 
@@ -73,12 +74,9 @@ impl EnvironmentLifecycleRequestProcessor {
             .await
             .map_err(lifecycle_error)?;
         let environment_ref = api_environment_ref(&environment);
-        self.outgoing
-            .send_server_notification(ServerNotification::EnvironmentCreated(
-                EnvironmentCreatedNotification {
-                    environment: api_environment(environment),
-                },
-            ))
+        let _ = self
+            .watches
+            .publish_event(EnvironmentLifecycleEvent::Created(environment))
             .await;
         Ok(Some(
             EnvironmentCreateResponse {
@@ -235,7 +233,7 @@ fn decode_static_cursor(cursor: &str) -> Result<StaticEnvironmentCursor, JSONRPC
     Ok(cursor)
 }
 
-fn api_environment(environment: DomainEnvironment) -> ApiEnvironment {
+pub(crate) fn api_environment(environment: DomainEnvironment) -> ApiEnvironment {
     ApiEnvironment {
         environment_ref: api_environment_ref(&environment),
         source: Some(ApiEnvironmentSource {

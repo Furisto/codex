@@ -8,6 +8,7 @@ use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::current_time::app_server_time_provider;
+use crate::environment_watch::EnvironmentWatchWorker;
 use crate::error_code::invalid_request;
 use crate::extensions::ThreadExtensionDependencies;
 use crate::extensions::app_server_extension_event_sink;
@@ -199,6 +200,7 @@ pub(crate) struct MessageProcessor {
     config_processor: ConfigRequestProcessor,
     environment_lifecycle_processor: EnvironmentLifecycleRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
+    environment_watch_worker: EnvironmentWatchWorker,
     external_agent_config_processor: ExternalAgentConfigRequestProcessor,
     feedback_processor: FeedbackRequestProcessor,
     fs_processor: FsRequestProcessor,
@@ -353,6 +355,12 @@ impl MessageProcessor {
             environment_provider_service.clone(),
             Arc::new(OnaEnvironmentProviderAdapterFactory::default()),
         );
+        let environment_watch_worker = EnvironmentWatchWorker::spawn(
+            environment_provider_service.clone(),
+            environment_lifecycle_service.clone(),
+            outgoing.clone(),
+        );
+        let environment_watches = environment_watch_worker.manager();
         let environment_manager_for_requests = Arc::clone(&environment_manager);
         let environment_manager_for_extensions = Arc::clone(&environment_manager);
         let restriction_product = session_source.restriction_product();
@@ -562,11 +570,12 @@ impl MessageProcessor {
             thread_manager.environment_manager(),
             environment_provider_service,
             environment_lifecycle_service.clone(),
+            environment_watches.clone(),
         );
         let environment_lifecycle_processor = EnvironmentLifecycleRequestProcessor::new(
             thread_manager.environment_manager(),
             environment_lifecycle_service,
-            outgoing.clone(),
+            environment_watches,
         );
         let fs_processor = FsRequestProcessor::new(
             Arc::clone(&environment_manager_for_requests),
@@ -590,6 +599,7 @@ impl MessageProcessor {
             config_processor,
             environment_lifecycle_processor,
             environment_processor,
+            environment_watch_worker,
             external_agent_config_processor,
             feedback_processor,
             fs_processor,
@@ -613,6 +623,7 @@ impl MessageProcessor {
         self.apps_processor.shutdown();
         self.models_refresh_worker.shutdown();
         self.skills_watcher.shutdown();
+        self.environment_watch_worker.shutdown();
     }
 
     pub(crate) async fn process_request(

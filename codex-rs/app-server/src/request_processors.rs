@@ -522,6 +522,7 @@ pub(crate) use catalog_processor::CatalogRequestProcessor;
 pub(crate) use command_exec_processor::CommandExecRequestProcessor;
 pub(crate) use config_processor::ConfigRequestProcessor;
 pub(crate) use environment_lifecycle_processor::EnvironmentLifecycleRequestProcessor;
+pub(crate) use environment_lifecycle_processor::api_environment;
 pub(crate) use environment_processor::EnvironmentRequestProcessor;
 pub(crate) use external_agent_config_processor::ExternalAgentConfigRequestProcessor;
 pub(crate) use external_agent_config_processor::ExternalAgentConfigRequestProcessorArgs;

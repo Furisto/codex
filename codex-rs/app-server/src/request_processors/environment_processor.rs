@@ -25,6 +25,7 @@ use codex_environment_provider::EnvironmentProviderService;
 use codex_environment_provider::EnvironmentProviderServiceCreateParams;
 use codex_environment_provider::EnvironmentProviderServiceError;
 use codex_environment_provider::EnvironmentProviderServiceUpdateParams;
+use codex_environment_provider::EnvironmentWatchManager;
 use codex_environment_provider::ListEnvironmentProvidersParams;
 use codex_environment_provider::PersonalAccessToken;
 use std::time::Duration;
@@ -38,6 +39,7 @@ pub(crate) struct EnvironmentRequestProcessor {
     environment_provider_service: EnvironmentProviderService,
     environment_lifecycle_service: EnvironmentLifecycleService,
     environment_provider_deletion_service: EnvironmentProviderDeletionService,
+    environment_watches: EnvironmentWatchManager,
 }
 
 impl EnvironmentRequestProcessor {
@@ -45,6 +47,7 @@ impl EnvironmentRequestProcessor {
         environment_manager: Arc<EnvironmentManager>,
         environment_provider_service: EnvironmentProviderService,
         environment_lifecycle_service: EnvironmentLifecycleService,
+        environment_watches: EnvironmentWatchManager,
     ) -> Self {
         let environment_provider_deletion_service =
             environment_lifecycle_service.deletion_service();
@@ -53,6 +56,7 @@ impl EnvironmentRequestProcessor {
             environment_provider_service,
             environment_lifecycle_service,
             environment_provider_deletion_service,
+            environment_watches,
         }
     }
 
@@ -112,6 +116,7 @@ impl EnvironmentRequestProcessor {
             })
             .await
             .map_err(provider_service_error)?;
+        self.environment_watches.start_provider(provider.id.clone());
         Ok(Some(
             EnvironmentProviderCreateResponse {
                 provider: api_provider(provider),
@@ -140,8 +145,10 @@ impl EnvironmentRequestProcessor {
             .await
             .map_err(provider_service_error)?;
         if authentication_changed {
+            self.environment_watches.stop_provider(&provider_id);
             self.environment_lifecycle_service
                 .invalidate_provider(&provider_id);
+            self.environment_watches.start_provider(provider_id);
         }
         Ok(Some(
             EnvironmentProviderUpdateResponse {
@@ -181,6 +188,7 @@ impl EnvironmentRequestProcessor {
         &self,
         params: EnvironmentProviderDeleteParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let provider_id = params.provider_id.clone();
         let cleanup = self
             .environment_provider_deletion_service
             .delete_provider(DomainDeleteEnvironmentProviderParams {
@@ -193,6 +201,7 @@ impl EnvironmentRequestProcessor {
             })
             .await
             .map_err(provider_deletion_error)?;
+        self.environment_watches.stop_provider(&provider_id);
         Ok(Some(
             EnvironmentProviderDeleteResponse {
                 cleanup: codex_app_server_protocol::EnvironmentProviderCleanup {

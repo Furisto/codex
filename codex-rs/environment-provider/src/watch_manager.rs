@@ -67,6 +67,17 @@ impl EnvironmentWatchManager {
         tasks.insert(provider_id, task.abort_handle());
     }
 
+    /// Enqueues an explicit lifecycle change into the same bounded stream as provider watches.
+    pub async fn publish_event(
+        &self,
+        event: EnvironmentLifecycleEvent,
+    ) -> Result<(), EnvironmentWatchError> {
+        self.events
+            .send(event)
+            .await
+            .map_err(|_| EnvironmentWatchError::EventReceiverClosed)
+    }
+
     /// Stops a provider watch without affecting other configured providers.
     pub fn stop_provider(&self, provider_id: &str) {
         if let Some(task) = self
