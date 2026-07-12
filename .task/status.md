@@ -4,9 +4,8 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. The first two foundational milestones
-from `.task/plan.md` have been completed and committed. The qualified environment identity
-milestone is implemented and verified locally, but has not yet been committed.
+Implementation is in progress on branch `ts/env-provider`. The three foundational milestones from
+delivery stage 1 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
 
@@ -47,9 +46,9 @@ Verification:
   skipped tests.
 - Scoped fixes passed for both `codex-exec-server-protocol` and `codex-exec-server`.
 
-## Current milestone: qualified environment identity
+### 3. Qualified environment identity
 
-Implementation is present in the worktree and awaiting its milestone commit.
+Commit: `8a1053caa8 Qualify environment IDs by provider`
 
 - Added canonical `providerId/environmentId` identity helpers.
 - Bare legacy IDs resolve as aliases for `static/<id>`.
@@ -66,9 +65,9 @@ Implementation is present in the worktree and awaiting its milestone commit.
 - Duplicate selection validation treats bare and canonical static IDs as the same environment.
 - Updated the app-server README and affected tests for canonical identity behavior.
 
-Verification completed so far:
+Verification:
 
-- Exec-server environment tests: 55/55 passed after the latest refactor.
+- Exec-server environment tests: 55/55 passed.
 - Core environment-selection tests: 14/14 passed.
 - `cargo check -p codex-app-server --lib` passed.
 - Scoped fixes passed for `codex-exec-server` and `codex-core`.
@@ -86,10 +85,9 @@ Known test blockers unrelated to this milestone:
 
 ## Next work
 
-1. Review and commit the qualified environment identity milestone.
-2. Begin delivery stage 2: introduce the environment-provider domain/store crate and local
+1. Begin delivery stage 2: introduce the environment-provider domain/store crate and local
    provider-definition persistence.
-3. Add encrypted PAT storage support, static provider synthesis, and provider CRUD APIs in
+2. Add encrypted PAT storage support, static provider synthesis, and provider CRUD APIs in
    separately committed logical milestones.
 
 This file will be updated after each subsequent milestone is committed.
