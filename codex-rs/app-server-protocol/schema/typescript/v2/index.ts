@@ -102,6 +102,8 @@ export type { DynamicToolSpec } from "./DynamicToolSpec";
 export type { EnvironmentProvider } from "./EnvironmentProvider";
 export type { EnvironmentProviderAuthentication } from "./EnvironmentProviderAuthentication";
 export type { EnvironmentProviderAuthenticationParams } from "./EnvironmentProviderAuthenticationParams";
+export type { EnvironmentProviderCleanup } from "./EnvironmentProviderCleanup";
+export type { EnvironmentProviderCleanupStatus } from "./EnvironmentProviderCleanupStatus";
 export type { EnvironmentProviderKind } from "./EnvironmentProviderKind";
 export type { ErrorNotification } from "./ErrorNotification";
 export type { ExecPolicyAmendment } from "./ExecPolicyAmendment";

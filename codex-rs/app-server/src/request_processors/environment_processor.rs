@@ -4,14 +4,21 @@ use codex_app_server_protocol::EnvironmentProviderAuthentication as ApiEnvironme
 use codex_app_server_protocol::EnvironmentProviderAuthenticationParams;
 use codex_app_server_protocol::EnvironmentProviderCreateParams;
 use codex_app_server_protocol::EnvironmentProviderCreateResponse;
+use codex_app_server_protocol::EnvironmentProviderDeleteParams;
+use codex_app_server_protocol::EnvironmentProviderDeleteResponse;
 use codex_app_server_protocol::EnvironmentProviderKind as ApiEnvironmentProviderKind;
 use codex_app_server_protocol::EnvironmentProviderListParams;
 use codex_app_server_protocol::EnvironmentProviderListResponse;
 use codex_app_server_protocol::EnvironmentProviderUpdateParams;
 use codex_app_server_protocol::EnvironmentProviderUpdateResponse;
+use codex_environment_provider::DeleteEnvironmentProviderMode;
+use codex_environment_provider::DeleteEnvironmentProviderParams as DomainDeleteEnvironmentProviderParams;
 use codex_environment_provider::EnvironmentProvider as DomainEnvironmentProvider;
 use codex_environment_provider::EnvironmentProviderAuthentication as DomainEnvironmentProviderAuthentication;
 use codex_environment_provider::EnvironmentProviderAuthenticationInput;
+use codex_environment_provider::EnvironmentProviderCleanupStatus as DomainEnvironmentProviderCleanupStatus;
+use codex_environment_provider::EnvironmentProviderDeletionError;
+use codex_environment_provider::EnvironmentProviderDeletionService;
 use codex_environment_provider::EnvironmentProviderKind as DomainEnvironmentProviderKind;
 use codex_environment_provider::EnvironmentProviderService;
 use codex_environment_provider::EnvironmentProviderServiceCreateParams;
@@ -28,6 +35,7 @@ const MAX_PROVIDER_LIST_LIMIT: usize = 100;
 pub(crate) struct EnvironmentRequestProcessor {
     environment_manager: Arc<EnvironmentManager>,
     environment_provider_service: EnvironmentProviderService,
+    environment_provider_deletion_service: EnvironmentProviderDeletionService,
 }
 
 impl EnvironmentRequestProcessor {
@@ -35,9 +43,14 @@ impl EnvironmentRequestProcessor {
         environment_manager: Arc<EnvironmentManager>,
         environment_provider_service: EnvironmentProviderService,
     ) -> Self {
+        let environment_provider_deletion_service =
+            EnvironmentProviderDeletionService::without_adapters(
+                environment_provider_service.clone(),
+            );
         Self {
             environment_manager,
             environment_provider_service,
+            environment_provider_deletion_service,
         }
     }
 
@@ -155,6 +168,43 @@ impl EnvironmentRequestProcessor {
             .into(),
         ))
     }
+
+    pub(crate) async fn provider_delete(
+        &self,
+        params: EnvironmentProviderDeleteParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let cleanup = self
+            .environment_provider_deletion_service
+            .delete_provider(DomainDeleteEnvironmentProviderParams {
+                provider_id: params.provider_id,
+                mode: if params.force {
+                    DeleteEnvironmentProviderMode::Force
+                } else {
+                    DeleteEnvironmentProviderMode::Normal
+                },
+            })
+            .await
+            .map_err(provider_deletion_error)?;
+        Ok(Some(
+            EnvironmentProviderDeleteResponse {
+                cleanup: codex_app_server_protocol::EnvironmentProviderCleanup {
+                    status: match cleanup.status {
+                        DomainEnvironmentProviderCleanupStatus::Complete => {
+                            codex_app_server_protocol::EnvironmentProviderCleanupStatus::Complete
+                        }
+                        DomainEnvironmentProviderCleanupStatus::Partial => {
+                            codex_app_server_protocol::EnvironmentProviderCleanupStatus::Partial
+                        }
+                        DomainEnvironmentProviderCleanupStatus::Unknown => {
+                            codex_app_server_protocol::EnvironmentProviderCleanupStatus::Unknown
+                        }
+                    },
+                    failed_environment_ids: cleanup.failed_environment_ids,
+                },
+            }
+            .into(),
+        ))
+    }
 }
 
 fn domain_provider_kind(kind: ApiEnvironmentProviderKind) -> DomainEnvironmentProviderKind {
@@ -202,5 +252,17 @@ fn provider_service_error(error: EnvironmentProviderServiceError) -> JSONRPCErro
         EnvironmentProviderServiceError::StorageUnavailable { .. }
         | EnvironmentProviderServiceError::CredentialUnavailable { .. }
         | EnvironmentProviderServiceError::Internal { .. } => internal_error(error.to_string()),
+    }
+}
+
+fn provider_deletion_error(error: EnvironmentProviderDeletionError) -> JSONRPCErrorError {
+    match error {
+        EnvironmentProviderDeletionError::Configuration(error) => provider_service_error(error),
+        EnvironmentProviderDeletionError::ProviderNotEmpty { .. } => {
+            invalid_request(error.to_string())
+        }
+        EnvironmentProviderDeletionError::CleanupUnavailable { .. } => {
+            internal_error(error.to_string())
+        }
     }
 }

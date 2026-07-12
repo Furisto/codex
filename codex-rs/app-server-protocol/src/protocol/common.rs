@@ -957,6 +957,13 @@ client_request_definitions! {
         serialization: global_shared_read("environment-provider"),
         response: v2::EnvironmentProviderListResponse,
     },
+    #[experimental("environmentProvider/delete")]
+    /// Deletes a dynamic environment provider after normal or forced cleanup.
+    EnvironmentProviderDelete => "environmentProvider/delete" {
+        params: v2::EnvironmentProviderDeleteParams,
+        serialization: global("environment-provider"),
+        response: v2::EnvironmentProviderDeleteResponse,
+    },
     #[experimental("environment/add")]
     /// Adds or replaces a remote environment by id for later selection.
     EnvironmentAdd => "environment/add" {

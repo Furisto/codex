@@ -1061,6 +1061,9 @@ impl MessageProcessor {
             ClientRequest::EnvironmentProviderList { params, .. } => {
                 self.environment_processor.provider_list(params).await
             }
+            ClientRequest::EnvironmentProviderDelete { params, .. } => {
+                self.environment_processor.provider_delete(params).await
+            }
             ClientRequest::FsReadFile { params, .. } => self
                 .fs_processor
                 .read_file(params)

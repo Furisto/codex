@@ -5329,6 +5329,32 @@
         }
       ]
     },
+    "EnvironmentProviderCleanup": {
+      "properties": {
+        "failedEnvironmentIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/EnvironmentProviderCleanupStatus"
+        }
+      },
+      "required": [
+        "failedEnvironmentIds",
+        "status"
+      ],
+      "type": "object"
+    },
+    "EnvironmentProviderCleanupStatus": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "EnvironmentProviderKind": {
       "description": "Supported environment provider kinds.",
       "oneOf": [

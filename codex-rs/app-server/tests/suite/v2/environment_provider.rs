@@ -5,6 +5,9 @@ use app_test_support::TestAppServer;
 use app_test_support::to_response;
 use codex_app_server_protocol::EnvironmentProvider;
 use codex_app_server_protocol::EnvironmentProviderAuthentication;
+use codex_app_server_protocol::EnvironmentProviderCleanup;
+use codex_app_server_protocol::EnvironmentProviderCleanupStatus;
+use codex_app_server_protocol::EnvironmentProviderDeleteResponse;
 use codex_app_server_protocol::EnvironmentProviderKind as ApiEnvironmentProviderKind;
 use codex_app_server_protocol::EnvironmentProviderListResponse;
 use codex_app_server_protocol::EnvironmentProviderUpdateResponse;
@@ -136,6 +139,76 @@ async fn provider_create_rejects_static_before_accessing_credentials() -> Result
     assert_eq!(
         error.error.message,
         "invalid environment provider request: the built-in static environment provider cannot be created"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_force_delete_reports_unknown_without_adapter_and_removes_definition() -> Result<()>
+{
+    let codex_home = TempDir::new()?;
+    let state_db =
+        StateRuntime::init(codex_home.path().to_path_buf(), "test-provider".to_string()).await?;
+    let stored = LocalEnvironmentProviderStore::new(state_db)
+        .create_provider(CreateEnvironmentProviderParams {
+            name: "Delete Me".to_string(),
+            kind: EnvironmentProviderKind::Ona,
+            url: "https://app.gitpod.io/api".to_string(),
+            authentication: StoredEnvironmentProviderAuthentication::Pat(
+                EncryptedEnvironmentProviderCredential {
+                    version: 1,
+                    ciphertext: vec![1, 2, 3],
+                },
+            ),
+        })
+        .await?;
+    let mut app_server = TestAppServer::new(codex_home.path()).await?;
+    timeout(RPC_TIMEOUT, app_server.initialize()).await??;
+
+    let delete_request_id = app_server
+        .send_raw_request(
+            "environmentProvider/delete",
+            Some(json!({"providerId": stored.id, "force": true})),
+        )
+        .await?;
+    let delete_response: JSONRPCResponse = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(delete_request_id)),
+    )
+    .await??;
+    assert_eq!(
+        to_response::<EnvironmentProviderDeleteResponse>(delete_response)?,
+        EnvironmentProviderDeleteResponse {
+            cleanup: EnvironmentProviderCleanup {
+                status: EnvironmentProviderCleanupStatus::Unknown,
+                failed_environment_ids: Vec::new(),
+            },
+        }
+    );
+
+    let list_request_id = app_server
+        .send_raw_request(
+            "environmentProvider/list",
+            Some(json!({"cursor": null, "limit": 10})),
+        )
+        .await?;
+    let list_response: JSONRPCResponse = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_response_message(RequestId::Integer(list_request_id)),
+    )
+    .await??;
+    assert_eq!(
+        to_response::<EnvironmentProviderListResponse>(list_response)?,
+        EnvironmentProviderListResponse {
+            data: vec![EnvironmentProvider {
+                id: "static".to_string(),
+                name: "Static".to_string(),
+                kind: ApiEnvironmentProviderKind::Static,
+                url: None,
+                authentication: None,
+            }],
+            next_cursor: None,
+        }
     );
     Ok(())
 }
