@@ -60,6 +60,7 @@ use tracing::warn;
 
 mod agent_jobs;
 mod backfill;
+mod environment_providers;
 mod external_agent_config_imports;
 mod goals;
 mod logs;
@@ -70,6 +71,13 @@ mod remote_control;
 mod test_support;
 mod threads;
 
+pub use environment_providers::CreateEnvironmentProviderRecord;
+pub use environment_providers::EnvironmentProviderAuthenticationRecord;
+pub use environment_providers::EnvironmentProviderListCursor;
+pub use environment_providers::EnvironmentProviderNameRecord;
+pub use environment_providers::EnvironmentProviderRecord;
+pub use environment_providers::EnvironmentProviderUpdate;
+pub use environment_providers::UpdateEnvironmentProviderRecordOutcome;
 pub use external_agent_config_imports::ExternalAgentConfigImportDetailsRecord;
 pub use external_agent_config_imports::ExternalAgentConfigImportFailureRecord;
 pub use external_agent_config_imports::ExternalAgentConfigImportHistoryRecord;
