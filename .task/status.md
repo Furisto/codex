@@ -455,10 +455,39 @@ Verification:
 - App-server `just fix` remains blocked by the previously documented unrelated
   `thread_processor_tests.rs` compilation errors.
 
+### 19. Provider lifecycle reconciliation state machine
+
+Commit: `651c7e186a Reconcile environment provider lifecycle state` (pushed to
+`ts/env-provider`)
+
+- Added a provider-local, in-memory `EnvironmentReconciler`; its projection is explicitly
+  non-durable and never replaces the external provider as authority.
+- Implemented complete multi-page reconciliation with provider-owned cursors, repeated-cursor
+  detection, duplicate-ID rejection, and provider-ownership validation.
+- Diffed successful snapshots deterministically into normalized created, updated, and deleted
+  lifecycle events.
+- Replaced the projection only after every page succeeds, preserving the last known-good state
+  across provider failures and malformed pagination for reconnect recovery.
+- Applied provider watch signals by reading complete records after change events, suppressing
+  unchanged updates, translating read-after-change not-found races into deletion, and ignoring
+  duplicate/unknown delete events.
+- Added fake-adapter coverage for initial and subsequent reconciliation, multi-page ordering,
+  repeated-cursor recovery without projection loss, complete-record watch reads, and delete
+  deduplication.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 23/23 passed before the final repeated-cursor test
+  refinement.
+- `just test -p codex-environment-provider -E 'test(reconciliation)'`: 3/3 passed after the final
+  refinement.
+- `just fix -p codex-environment-provider` passed.
+
 ## Next work
 
-1. Add reconciliation/watch ownership, lifecycle notification delivery, and execution projection.
-2. Implement provider connector integration and PAT-driven watch/connector replacement.
+1. Add watch task ownership, initial/reconnect reconciliation, and lifecycle event delivery.
+2. Implement execution projection, provider connectors, and PAT-driven watch/connector
+   replacement.
 3. Implement the Ona adapter and replace the no-adapter app-server factory.
 
 This file will be updated after each subsequent milestone is committed.
