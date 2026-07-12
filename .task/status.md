@@ -534,12 +534,42 @@ Verification:
 - `just test -p codex-environment-provider -E 'test(ona::tests)'`: 3/3 passed after the rename.
 - `just fix -p codex-environment-provider` passed without warnings.
 
+### 22. Ona unary lifecycle adapter
+
+Commit: `953c2958dd Implement Ona environment lifecycle adapter` (pushed to
+`ts/env-provider`)
+
+- Added the concrete Ona adapter factory over resolved provider definitions and decrypted PAT
+  authentication.
+- Implemented authenticated protobuf-JSON Connect calls for Ona environment create, get, list, and
+  delete using the provider's resolved control-plane URL.
+- Sent bearer authentication and Connect protocol version headers on provider requests without
+  exposing the PAT through debug output or responses.
+- Classified invalid requests, missing environments, authentication/rate-limit/server
+  unavailability, and malformed successful responses into the common adapter error model.
+- Bounded provider error-body text before including it in errors.
+- Implemented Ona's required local annotation filtering: each upstream list request is sized to the
+  remaining requested Codex page, foreign resources are discarded locally, and successive
+  upstream tokens are fetched until the Codex page is full or Ona is exhausted.
+- Preserved Ona's opaque continuation token as the Codex cursor and rejected repeated tokens.
+- Kept Ona event watch construction explicitly unavailable for the next streaming milestone.
+- Added mock-server coverage for exact routes, PAT and Connect headers, create/read/delete mapping,
+  request bodies, two-page post-filter filling, and cursor propagation.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 30/30 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after adding Reqwest and Wiremock dependencies; Cargo lock
+  membership was refreshed and the Bazel lockfile required no content change.
+
 ## Next work
 
-1. Add the Ona Connect HTTP client for create/read/list/delete and local post-filter pagination.
+1. Replace the no-adapter app-server factory with the Ona factory and add end-to-end dynamic API
+   coverage.
 2. Add process-scoped watch task ownership and lifecycle event delivery.
 3. Implement execution projection, provider connectors, and PAT-driven watch/connector
    replacement.
-4. Finish the Ona event stream and replace the no-adapter app-server factory.
+4. Finish the Ona event stream.
 
 This file will be updated after each subsequent milestone is committed.
