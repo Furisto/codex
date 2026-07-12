@@ -3,6 +3,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+use super::provider::DefaultEnvironmentProvider;
+use super::provider::EnvironmentDefault;
+use super::provider::EnvironmentProvider;
+use super::provider::EnvironmentProviderSnapshot;
+use super::provider::normalize_exec_server_url;
+use super::static_provider::environment_provider_from_codex_home;
 use crate::ExecServerError;
 use crate::ExecServerRuntimePaths;
 use crate::ExecutorFileSystem;
@@ -13,12 +19,6 @@ use crate::client::LazyRemoteExecServerClient;
 use crate::client::http_client::ReqwestHttpClient;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
-use crate::environment_provider::DefaultEnvironmentProvider;
-use crate::environment_provider::EnvironmentDefault;
-use crate::environment_provider::EnvironmentProvider;
-use crate::environment_provider::EnvironmentProviderSnapshot;
-use crate::environment_provider::normalize_exec_server_url;
-use crate::environment_toml::environment_provider_from_codex_home;
 use crate::local_file_system::LocalFileSystem;
 use crate::local_process::LocalProcess;
 use crate::process::ExecBackend;
@@ -54,7 +54,7 @@ pub const CODEX_EXEC_SERVER_NOISE_CHATGPT_ACCOUNT_ID_ENV_VAR: &str =
 #[derive(Debug)]
 pub struct EnvironmentManager {
     default_environment: Option<String>,
-    pub(super) environments: RwLock<HashMap<String, Arc<Environment>>>,
+    pub(crate) environments: RwLock<HashMap<String, Arc<Environment>>>,
     local_environment: Option<Arc<Environment>>,
     local_runtime_paths: Option<ExecServerRuntimePaths>,
 }
@@ -628,7 +628,9 @@ mod tests {
     use std::time::Duration;
 
     use super::Environment;
+    use super::EnvironmentDefault;
     use super::EnvironmentManager;
+    use super::EnvironmentProviderSnapshot;
     use super::LOCAL_ENVIRONMENT_ID;
     use super::REMOTE_ENVIRONMENT_ID;
     use super::noise_environment_config_from_values;
@@ -636,8 +638,6 @@ mod tests {
     use crate::ProcessId;
     use crate::client_api::ExecServerTransportParams;
     use crate::client_api::StdioExecServerCommand;
-    use crate::environment_provider::EnvironmentDefault;
-    use crate::environment_provider::EnvironmentProviderSnapshot;
     use codex_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
     use tokio::net::TcpListener;

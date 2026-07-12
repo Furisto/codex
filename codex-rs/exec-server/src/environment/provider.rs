@@ -1,11 +1,11 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use super::manager::CODEX_EXEC_SERVER_URL_ENV_VAR;
+use super::manager::LOCAL_ENVIRONMENT_ID;
+use super::manager::REMOTE_ENVIRONMENT_ID;
 use crate::Environment;
 use crate::ExecServerError;
-use crate::environment::CODEX_EXEC_SERVER_URL_ENV_VAR;
-use crate::environment::LOCAL_ENVIRONMENT_ID;
-use crate::environment::REMOTE_ENVIRONMENT_ID;
 
 /// Lists the concrete environments available to Codex.
 ///

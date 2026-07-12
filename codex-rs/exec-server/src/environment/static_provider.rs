@@ -7,18 +7,18 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use crate::DefaultEnvironmentProvider;
+use super::manager::LOCAL_ENVIRONMENT_ID;
+use super::provider::DefaultEnvironmentProvider;
+use super::provider::EnvironmentDefault;
+use super::provider::EnvironmentProvider;
+use super::provider::EnvironmentProviderFuture;
+use super::provider::EnvironmentProviderSnapshot;
 use crate::Environment;
-use crate::EnvironmentProvider;
-use crate::EnvironmentProviderFuture;
 use crate::ExecServerError;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
 use crate::client_api::StdioExecServerCommand;
-use crate::environment::LOCAL_ENVIRONMENT_ID;
-use crate::environment_provider::EnvironmentDefault;
-use crate::environment_provider::EnvironmentProviderSnapshot;
 
 const ENVIRONMENTS_TOML_FILE: &str = "environments.toml";
 const MAX_ENVIRONMENT_ID_LEN: usize = 64;
@@ -49,13 +49,13 @@ struct EnvironmentToml {
 }
 
 #[derive(Clone, Debug)]
-struct TomlEnvironmentProvider {
+struct StaticEnvironmentProvider {
     default: EnvironmentDefault,
     include_local: bool,
     environments: Vec<(String, ExecServerTransportParams)>,
 }
 
-impl TomlEnvironmentProvider {
+impl StaticEnvironmentProvider {
     #[cfg(test)]
     fn new(config: EnvironmentsToml) -> Result<Self, ExecServerError> {
         Self::new_with_config_dir(config, /*config_dir*/ None)
@@ -113,9 +113,9 @@ impl TomlEnvironmentProvider {
     }
 }
 
-impl EnvironmentProvider for TomlEnvironmentProvider {
+impl EnvironmentProvider for StaticEnvironmentProvider {
     fn snapshot(&self) -> EnvironmentProviderFuture<'_> {
-        Box::pin(TomlEnvironmentProvider::snapshot(self))
+        Box::pin(StaticEnvironmentProvider::snapshot(self))
     }
 }
 
@@ -219,7 +219,7 @@ pub(crate) fn environment_provider_from_codex_home(
     }
 
     let environments = load_environments_toml(&path)?;
-    Ok(Box::new(TomlEnvironmentProvider::new_with_config_dir(
+    Ok(Box::new(StaticEnvironmentProvider::new_with_config_dir(
         environments,
         Some(codex_home),
     )?))
@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn toml_provider_includes_local_and_adds_configured_environments() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let provider = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: Some("ssh-dev".to_string()),
             include_local: None,
             environments: vec![
@@ -403,7 +403,8 @@ mod tests {
 
     #[tokio::test]
     async fn toml_provider_default_omitted_selects_local() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml::default()).expect("provider");
+        let provider =
+            StaticEnvironmentProvider::new(EnvironmentsToml::default()).expect("provider");
         let snapshot = provider.snapshot().await.expect("environments");
 
         assert!(snapshot.include_local);
@@ -415,7 +416,7 @@ mod tests {
 
     #[tokio::test]
     async fn toml_provider_default_none_disables_default() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let provider = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: Some("none".to_string()),
             include_local: None,
             environments: Vec::new(),
@@ -429,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn toml_provider_can_disable_local_environment() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let provider = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: Some("ssh-dev".to_string()),
             include_local: Some(false),
             environments: vec![EnvironmentToml {
@@ -450,7 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn toml_provider_without_local_and_default_omitted_disables_default() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let provider = StaticEnvironmentProvider::new(EnvironmentsToml {
             include_local: Some(false),
             ..Default::default()
         })
@@ -463,7 +464,7 @@ mod tests {
 
     #[test]
     fn toml_provider_rejects_local_default_when_local_is_disabled() {
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: Some(LOCAL_ENVIRONMENT_ID.to_string()),
             include_local: Some(false),
             environments: Vec::new(),
@@ -548,7 +549,7 @@ mod tests {
         ];
 
         for (item, expected) in cases {
-            let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+            let err = StaticEnvironmentProvider::new(EnvironmentsToml {
                 default: None,
                 include_local: None,
                 environments: vec![item],
@@ -565,7 +566,7 @@ mod tests {
     #[test]
     fn toml_provider_resolves_relative_stdio_cwd_from_config_dir() {
         let config_dir = tempdir().expect("tempdir");
-        let provider = TomlEnvironmentProvider::new_with_config_dir(
+        let provider = StaticEnvironmentProvider::new_with_config_dir(
             EnvironmentsToml {
                 default: None,
                 include_local: None,
@@ -604,7 +605,7 @@ mod tests {
 
     #[test]
     fn toml_provider_parses_configured_transport_timeouts() {
-        let provider = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let provider = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: None,
             include_local: None,
             environments: vec![
@@ -658,7 +659,7 @@ mod tests {
 
     #[test]
     fn toml_provider_rejects_relative_stdio_cwd_without_config_dir() {
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: None,
             include_local: None,
             environments: vec![EnvironmentToml {
@@ -678,7 +679,7 @@ mod tests {
 
     #[test]
     fn toml_provider_rejects_duplicate_ids() {
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: None,
             include_local: None,
             environments: vec![
@@ -705,7 +706,7 @@ mod tests {
     #[test]
     fn toml_provider_rejects_overlong_id() {
         let id = "a".repeat(MAX_ENVIRONMENT_ID_LEN + 1);
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: None,
             include_local: None,
             environments: vec![EnvironmentToml {
@@ -726,7 +727,7 @@ mod tests {
 
     #[test]
     fn toml_provider_rejects_unknown_default() {
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: Some("missing".to_string()),
             include_local: None,
             environments: Vec::new(),
@@ -831,7 +832,7 @@ unknown = true
 
     #[test]
     fn toml_provider_rejects_malformed_websocket_url() {
-        let err = TomlEnvironmentProvider::new(EnvironmentsToml {
+        let err = StaticEnvironmentProvider::new(EnvironmentsToml {
             default: None,
             include_local: None,
             environments: vec![EnvironmentToml {
