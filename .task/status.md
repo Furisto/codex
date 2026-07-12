@@ -585,9 +585,33 @@ Verification:
   added. Ona HTTP authentication and lifecycle mapping remain covered by the 30 passing
   `codex-environment-provider` tests from milestone 22.
 
+### 24. Process-scoped provider watch ownership
+
+Commit: `fff23a1380 Own environment provider watch tasks` (pushed to
+`ts/env-provider`)
+
+- Added a crate-owned watch manager that retains exactly one abortable task for each configured
+  dynamic provider.
+- Starting an existing provider replaces its task, providing the lifecycle needed for PAT-driven
+  adapter replacement and fresh reconciliation.
+- Excluded the built-in static provider from dynamic watch construction.
+- Retried provider configuration and adapter resolution failures with capped exponential backoff;
+  provider-level watch failures continue to use the runner's reconcile-before-reconnect loop.
+- Routed every provider task through one caller-owned bounded event channel so downstream
+  processing applies shared backpressure.
+- Added explicit per-provider stop and process-wide shutdown operations.
+- Added coverage for initial task startup, replacement, cached adapter reuse, reconciliation event
+  delivery, task stop, and static-provider exclusion.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 32/32 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after enabling Tokio runtime support; no lockfile content changed.
+
 ## Next work
 
-1. Add process-scoped watch task ownership and lifecycle event delivery.
+1. Attach configured provider watches to app-server startup and lifecycle notification delivery.
 2. Implement execution projection, provider connectors, and PAT-driven watch/connector
    replacement.
 3. Finish the Ona event stream.
