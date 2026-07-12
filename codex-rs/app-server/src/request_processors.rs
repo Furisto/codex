@@ -365,6 +365,8 @@ use codex_core_plugins::remote::RemotePluginSummary as RemoteCatalogPluginSummar
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::LOCAL_FS;
+use codex_exec_server::canonical_environment_id;
+use codex_exec_server::canonical_static_environment_id;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_features::Stage;
@@ -564,7 +566,8 @@ fn resolve_turn_environment_selections(
     };
     let mut selections = Vec::with_capacity(environments.len());
     for environment in environments {
-        let environment_id = environment.environment_id;
+        let environment_id = canonical_environment_id(&environment.environment_id)
+            .map_err(|err| invalid_request(err.to_string()))?;
         let cwd = environment
             .cwd
             .to_inferred_path_uri()

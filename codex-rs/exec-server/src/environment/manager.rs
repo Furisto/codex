@@ -3,6 +3,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+use super::identity::LOCAL_ENVIRONMENT_ID;
+use super::identity::REMOTE_ENVIRONMENT_ID;
+use super::identity::canonical_environment_id;
 use super::provider::DefaultEnvironmentProvider;
 use super::provider::EnvironmentDefault;
 use super::provider::EnvironmentProvider;
@@ -58,9 +61,6 @@ pub struct EnvironmentManager {
     local_environment: Option<Arc<Environment>>,
     local_runtime_paths: Option<ExecServerRuntimePaths>,
 }
-
-pub const LOCAL_ENVIRONMENT_ID: &str = "local";
-pub const REMOTE_ENVIRONMENT_ID: &str = "remote";
 
 impl EnvironmentManager {
     /// Builds a test-only manager without configured sandbox helper paths.
@@ -192,11 +192,7 @@ impl EnvironmentManager {
             None
         };
         for (id, environment) in environments {
-            if id.is_empty() {
-                return Err(ExecServerError::Protocol(
-                    "environment id cannot be empty".to_string(),
-                ));
-            }
+            let id = canonical_environment_id(&id)?;
             if id == LOCAL_ENVIRONMENT_ID {
                 return Err(ExecServerError::Protocol(format!(
                     "environment id `{LOCAL_ENVIRONMENT_ID}` is reserved for EnvironmentManager"
@@ -214,6 +210,7 @@ impl EnvironmentManager {
         let default_environment = match default {
             EnvironmentDefault::Disabled => None,
             EnvironmentDefault::EnvironmentId(environment_id) => {
+                let environment_id = canonical_environment_id(&environment_id)?;
                 if !environment_map.contains_key(&environment_id) {
                     return Err(ExecServerError::Protocol(format!(
                         "default environment `{environment_id}` is not configured"
@@ -279,10 +276,11 @@ impl EnvironmentManager {
 
     /// Returns a named environment instance.
     pub fn get_environment(&self, environment_id: &str) -> Option<Arc<Environment>> {
+        let environment_id = canonical_environment_id(environment_id).ok()?;
         self.environments
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(environment_id)
+            .get(&environment_id)
             .cloned()
     }
 
@@ -295,10 +293,11 @@ impl EnvironmentManager {
         exec_server_url: String,
         connect_timeout: Option<std::time::Duration>,
     ) -> Result<(), ExecServerError> {
-        if environment_id.is_empty() {
-            return Err(ExecServerError::Protocol(
-                "environment id cannot be empty".to_string(),
-            ));
+        let environment_id = canonical_environment_id(&environment_id)?;
+        if environment_id == LOCAL_ENVIRONMENT_ID {
+            return Err(ExecServerError::Protocol(format!(
+                "environment id `{LOCAL_ENVIRONMENT_ID}` is reserved for EnvironmentManager"
+            )));
         }
         let (exec_server_url, disabled) = normalize_exec_server_url(Some(exec_server_url));
         if disabled {
@@ -336,11 +335,7 @@ impl EnvironmentManager {
         environment_id: String,
         provider: Arc<dyn NoiseRendezvousConnectProvider>,
     ) -> Result<(), ExecServerError> {
-        if environment_id.is_empty() {
-            return Err(ExecServerError::Protocol(
-                "environment id cannot be empty".to_string(),
-            ));
-        }
+        let environment_id = canonical_environment_id(&environment_id)?;
         let identity = NoiseChannelIdentity::generate().map_err(|error| {
             ExecServerError::Protocol(format!(
                 "failed to generate Noise harness identity: {error}"
@@ -839,7 +834,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "exec-server protocol error: environment id `local` is reserved for EnvironmentManager"
+            "exec-server protocol error: environment id `static/local` is reserved for EnvironmentManager"
         );
     }
 
@@ -857,10 +852,13 @@ mod tests {
         let manager = EnvironmentManager::from_snapshot(snapshot, Some(test_runtime_paths()))
             .expect("manager");
 
-        assert_eq!(manager.default_environment_id(), Some("devbox"));
+        assert_eq!(manager.default_environment_id(), Some("static/devbox"));
         assert_eq!(
             manager.default_environment_ids(),
-            vec!["devbox".to_string(), LOCAL_ENVIRONMENT_ID.to_string()]
+            vec![
+                "static/devbox".to_string(),
+                LOCAL_ENVIRONMENT_ID.to_string()
+            ]
         );
         assert!(manager.default_environment().expect("default").is_remote());
     }
@@ -905,7 +903,7 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "exec-server protocol error: default environment `missing` is not configured"
+            "exec-server protocol error: default environment `static/missing` is not configured"
         );
     }
 
@@ -1013,6 +1011,12 @@ mod tests {
         let first = manager
             .get_environment("executor-a")
             .expect("first remote environment");
+        assert!(Arc::ptr_eq(
+            &first,
+            &manager
+                .get_environment("static/executor-a")
+                .expect("canonical static environment")
+        ));
         assert!(first.is_remote());
         assert_eq!(first.exec_server_url(), Some("ws://127.0.0.1:8765"));
         assert_eq!(manager.default_environment_id(), None);
@@ -1030,6 +1034,48 @@ mod tests {
         assert!(second.is_remote());
         assert_eq!(second.exec_server_url(), Some("ws://127.0.0.1:9876"));
         assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn environment_manager_preserves_provider_native_slashes() {
+        let manager = EnvironmentManager::without_environments();
+
+        manager
+            .upsert_environment(
+                "ona/environment/with/slashes".to_string(),
+                "ws://127.0.0.1:8765".to_string(),
+                /*connect_timeout*/ None,
+            )
+            .expect("remote environment");
+
+        assert!(
+            manager
+                .get_environment("ona/environment/with/slashes")
+                .is_some()
+        );
+        assert!(
+            manager
+                .get_environment("environment/with/slashes")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn environment_upsert_rejects_reserved_local_id() {
+        let manager = EnvironmentManager::default_for_tests();
+
+        let error = manager
+            .upsert_environment(
+                "local".to_string(),
+                "ws://127.0.0.1:8765".to_string(),
+                /*connect_timeout*/ None,
+            )
+            .expect_err("reserved environment id");
+
+        assert_eq!(
+            error.to_string(),
+            "exec-server protocol error: environment id `static/local` is reserved for EnvironmentManager"
+        );
     }
 
     #[tokio::test]

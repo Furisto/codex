@@ -7,7 +7,9 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use super::manager::LOCAL_ENVIRONMENT_ID;
+use super::identity::LOCAL_ENVIRONMENT_ID;
+use super::identity::STATIC_LOCAL_ENVIRONMENT_ID;
+use super::identity::qualify_static_environment_id;
 use super::provider::DefaultEnvironmentProvider;
 use super::provider::EnvironmentDefault;
 use super::provider::EnvironmentProvider;
@@ -73,7 +75,7 @@ impl StaticEnvironmentProvider {
         let include_local = include_local.unwrap_or(true);
         let mut ids = HashSet::new();
         if include_local {
-            ids.insert(LOCAL_ENVIRONMENT_ID.to_string());
+            ids.insert(STATIC_LOCAL_ENVIRONMENT_ID.to_string());
         }
         let mut parsed_environments = Vec::with_capacity(environments.len());
         for item in environments {
@@ -97,7 +99,7 @@ impl StaticEnvironmentProvider {
         let mut environments = Vec::with_capacity(self.environments.len());
         for (id, transport_params) in &self.environments {
             environments.push((
-                id.clone(),
+                qualify_static_environment_id(id),
                 Environment::remote_with_transport(
                     transport_params.clone(),
                     /*local_runtime_paths*/ None,
@@ -252,7 +254,9 @@ fn normalize_default_environment_id(
     if default.eq_ignore_ascii_case("none") {
         Ok(EnvironmentDefault::Disabled)
     } else {
-        Ok(EnvironmentDefault::EnvironmentId(default.to_string()))
+        Ok(EnvironmentDefault::EnvironmentId(
+            qualify_static_environment_id(default),
+        ))
     }
 }
 
@@ -268,7 +272,7 @@ fn validate_environment_id(id: &str) -> Result<(), ExecServerError> {
             "environment id `{id}` must not contain surrounding whitespace"
         )));
     }
-    if id == LOCAL_ENVIRONMENT_ID || id.eq_ignore_ascii_case("none") {
+    if id == STATIC_LOCAL_ENVIRONMENT_ID || id.eq_ignore_ascii_case("none") {
         return Err(ExecServerError::Protocol(format!(
             "environment id `{id}` is reserved"
         )));
@@ -384,20 +388,20 @@ mod tests {
             .iter()
             .map(|(id, _environment)| id.as_str())
             .collect();
-        assert_eq!(environment_ids, vec!["devbox", "ssh-dev"]);
+        assert_eq!(environment_ids, vec!["static/devbox", "static/ssh-dev"]);
         let environments: HashMap<_, _> = environments.into_iter().collect();
 
         assert!(include_local);
         assert!(!environments.contains_key(LOCAL_ENVIRONMENT_ID));
         assert_eq!(
-            environments["devbox"].exec_server_url(),
+            environments["static/devbox"].exec_server_url(),
             Some("ws://127.0.0.1:8765")
         );
-        assert!(environments["ssh-dev"].is_remote());
-        assert_eq!(environments["ssh-dev"].exec_server_url(), None);
+        assert!(environments["static/ssh-dev"].is_remote());
+        assert_eq!(environments["static/ssh-dev"].exec_server_url(), None);
         assert_eq!(
             default,
-            EnvironmentDefault::EnvironmentId("ssh-dev".to_string())
+            EnvironmentDefault::EnvironmentId("static/ssh-dev".to_string())
         );
     }
 
@@ -445,7 +449,7 @@ mod tests {
         assert!(!snapshot.include_local);
         assert_eq!(
             snapshot.default,
-            EnvironmentDefault::EnvironmentId("ssh-dev".to_string())
+            EnvironmentDefault::EnvironmentId("static/ssh-dev".to_string())
         );
     }
 
@@ -465,7 +469,7 @@ mod tests {
     #[test]
     fn toml_provider_rejects_local_default_when_local_is_disabled() {
         let err = StaticEnvironmentProvider::new(EnvironmentsToml {
-            default: Some(LOCAL_ENVIRONMENT_ID.to_string()),
+            default: Some(STATIC_LOCAL_ENVIRONMENT_ID.to_string()),
             include_local: Some(false),
             environments: Vec::new(),
         })

@@ -8,6 +8,7 @@ use codex_exec_server::Environment;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerError;
 use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::canonical_environment_id;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
@@ -108,12 +109,24 @@ impl ThreadEnvironments {
         let mut seen_environment_ids = HashSet::with_capacity(environments.len());
         let mut next = Vec::with_capacity(environments.len());
         for selected_environment in environments {
-            if !seen_environment_ids.insert(selected_environment.environment_id.as_str()) {
+            let Ok(environment_id) = canonical_environment_id(&selected_environment.environment_id)
+            else {
+                tracing::warn!(
+                    "skipping invalid turn environment `{}`",
+                    selected_environment.environment_id
+                );
+                continue;
+            };
+            if !seen_environment_ids.insert(environment_id.clone()) {
                 continue;
             }
+            let selected_environment = TurnEnvironmentSelection {
+                environment_id,
+                cwd: selected_environment.cwd.clone(),
+            };
             if let Some(environment) = previous
                 .iter()
-                .find(|environment| environment.selection == *selected_environment)
+                .find(|environment| environment.selection == selected_environment)
                 && !matches!(environment.resolution.clone().now_or_never(), Some(Err(_)))
             {
                 next.push(environment.clone());
@@ -135,7 +148,7 @@ impl ThreadEnvironments {
             drop(tokio::spawn(resolution_task));
             let resolution = resolution.boxed().shared();
             next.push(SelectedTurnEnvironment {
-                selection: selected_environment.clone(),
+                selection: selected_environment,
                 resolution,
             });
         }
@@ -514,7 +527,7 @@ url = "ws://127.0.0.1:8765"
     }
 
     #[tokio::test]
-    async fn resolved_environment_selections_use_first_selection_as_primary() {
+    async fn resolved_environment_selections_canonicalize_legacy_ids() {
         let cwd = AbsolutePathBuf::current_dir().expect("cwd");
         let selected_cwd = cwd.join("selected");
         let selected_cwd_uri = PathUri::from_abs_path(&selected_cwd);
@@ -535,7 +548,7 @@ url = "ws://127.0.0.1:8765"
                 .primary()
                 .expect("primary environment")
                 .environment_id,
-            "local"
+            LOCAL_ENVIRONMENT_ID
         );
         assert_eq!(
             resolved.primary().expect("primary environment").shell,

@@ -64,6 +64,7 @@ use codex_app_server_protocol::WarningNotification;
 use codex_config::config_toml::ConfigToml;
 use codex_core::personality_migration::PERSONALITY_MIGRATION_FILENAME;
 use codex_core::test_support::all_model_presets;
+use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_features::FEATURES;
 use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
@@ -2231,7 +2232,7 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
         panic!("expected CommandExecutionRequestApproval request");
     };
     assert_eq!(params.item_id, "call1");
-    assert_eq!(params.environment_id.as_deref(), Some("local"));
+    assert_eq!(params.environment_id.as_deref(), Some(LOCAL_ENVIRONMENT_ID));
     let resolved_request_id = request_id.clone();
 
     // Approve and wait for task completion

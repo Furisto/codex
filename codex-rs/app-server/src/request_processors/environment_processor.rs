@@ -17,9 +17,11 @@ impl EnvironmentRequestProcessor {
         &self,
         params: EnvironmentAddParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let environment_id = canonical_static_environment_id(&params.environment_id)
+            .map_err(|err| invalid_request(err.to_string()))?;
         self.environment_manager
             .upsert_environment(
-                params.environment_id,
+                environment_id,
                 params.exec_server_url,
                 params.connect_timeout_ms.map(Duration::from_millis),
             )

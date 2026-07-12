@@ -4,6 +4,7 @@ use anyhow::Result;
 use app_test_support::TestAppServer;
 use app_test_support::to_response;
 use codex_app_server_protocol::EnvironmentAddResponse;
+use codex_app_server_protocol::JSONRPCError;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::RequestId;
 use serde_json::json;
@@ -48,5 +49,33 @@ async fn environment_add_applies_connect_timeout() -> Result<()> {
     let _: EnvironmentAddResponse = to_response(response)?;
 
     timeout(CONNECTION_CLOSE_TIMEOUT, stalled_server).await???;
+    Ok(())
+}
+
+#[tokio::test]
+async fn environment_add_rejects_non_static_provider() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut app_server = TestAppServer::new(codex_home.path()).await?;
+    timeout(RPC_TIMEOUT, app_server.initialize()).await??;
+
+    let request_id = app_server
+        .send_raw_request(
+            "environment/add",
+            Some(json!({
+                "environmentId": "ona/environment-a",
+                "execServerUrl": "ws://127.0.0.1:8765",
+            })),
+        )
+        .await?;
+    let error: JSONRPCError = timeout(
+        RPC_TIMEOUT,
+        app_server.read_stream_until_error_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+
+    assert_eq!(
+        error.error.message,
+        "exec-server protocol error: environment `ona/environment-a` does not belong to the static provider"
+    );
     Ok(())
 }

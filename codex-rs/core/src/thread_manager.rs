@@ -26,6 +26,7 @@ use codex_code_mode::InProcessCodeModeSessionProvider;
 use codex_code_mode::ProcessOwnedCodeModeSessionProvider;
 use codex_core_plugins::PluginsManager;
 use codex_exec_server::EnvironmentManager;
+use codex_exec_server::canonical_environment_id;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::ExtensionRegistry;
 use codex_extension_api::LoadedUserInstructions;
@@ -545,7 +546,9 @@ impl ThreadManager {
     ) -> CodexResult<()> {
         let mut environment_ids = HashSet::with_capacity(environments.len());
         for environment in environments {
-            if !environment_ids.insert(environment.environment_id.as_str()) {
+            let environment_id = canonical_environment_id(&environment.environment_id)
+                .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            if !environment_ids.insert(environment_id) {
                 return Err(CodexErr::InvalidRequest(format!(
                     "duplicate turn environment id `{}`",
                     environment.environment_id

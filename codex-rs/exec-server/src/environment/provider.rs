@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use super::identity::LOCAL_ENVIRONMENT_ID;
+use super::identity::REMOTE_ENVIRONMENT_ID;
 use super::manager::CODEX_EXEC_SERVER_URL_ENV_VAR;
-use super::manager::LOCAL_ENVIRONMENT_ID;
-use super::manager::REMOTE_ENVIRONMENT_ID;
 use crate::Environment;
 use crate::ExecServerError;
 
