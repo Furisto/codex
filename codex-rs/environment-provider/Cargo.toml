@@ -1,0 +1,19 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-environment-provider"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "codex_environment_provider"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

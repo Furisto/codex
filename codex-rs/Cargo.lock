@@ -3059,6 +3059,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-environment-provider"
+version = "0.0.0"
+dependencies = [
+ "pretty_assertions",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "codex-exec"
 version = "0.0.0"
 dependencies = [

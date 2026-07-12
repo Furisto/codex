@@ -46,6 +46,7 @@ members = [
     "file-system",
     "exec-server-protocol",
     "exec-server",
+    "environment-provider",
     "execpolicy",
     "execpolicy-legacy",
     "ext/connectors",
@@ -176,6 +177,7 @@ codex-exec = { path = "exec" }
 codex-file-system = { path = "file-system" }
 codex-exec-server-protocol = { path = "exec-server-protocol" }
 codex-exec-server = { path = "exec-server" }
+codex-environment-provider = { path = "environment-provider" }
 codex-execpolicy = { path = "execpolicy" }
 codex-extension-api = { path = "ext/extension-api" }
 codex-goal-extension = { path = "ext/goal" }
