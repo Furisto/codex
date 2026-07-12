@@ -6,6 +6,7 @@ mod deletion;
 mod error;
 mod lifecycle;
 mod local;
+mod ona;
 mod operation_locks;
 mod reconciliation;
 mod service;
