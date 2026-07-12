@@ -4,9 +4,9 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete. Provider
-storage/API work from delivery stage 2 is in progress, with the generic adapter boundary now also
-started as a prerequisite for safe provider deletion.
+Implementation is in progress on branch `ts/env-provider`. Delivery stages 1 and 2 are complete,
+including provider configuration CRUD and deletion cleanup. Delivery stage 3 environment
+lifecycle APIs and runtime orchestration are next.
 
 ## Completed milestones
 
@@ -312,9 +312,39 @@ Verification:
 - `just test -p codex-environment-provider`: 18/18 passed.
 - `just fix -p codex-environment-provider` passed.
 
+### 14. App-server provider delete API
+
+Commit: `de5517ccfe Expose environment provider delete API`
+
+- Registered the experimental v2 `environmentProvider/delete` method and dispatched it through
+  the environment request processor.
+- Wired normal deletion to fail closed unless authenticated provider cleanup can prove the
+  provider has no environments.
+- Wired forced deletion to best-effort cleanup and return `complete`, `partial`, or `unknown` with
+  known failed environment IDs before removing the provider definition.
+- Kept the static provider undeletable through the domain deletion service.
+- Initialized app-server deletion without dynamic adapters for now: normal deletion therefore
+  fails closed, while forced deletion removes the definition and reports `unknown`. The Ona
+  adapter milestone will provide live cleanup.
+- Updated the app-server README and regenerated stable and experimental schemas.
+- Added end-to-end JSON-RPC coverage proving forced deletion reports unknown without an adapter,
+  removes the dynamic definition, and preserves the static provider.
+
+Verification:
+
+- `just test -p codex-app-server-protocol`: 254/254 passed.
+- `cargo check -p codex-app-server --lib` passed.
+- All three targeted `environment_provider` app-server integration tests passed after temporarily
+  adding the unrelated missing `config_snapshot: None` initializer in `remote_thread_store.rs`;
+  that temporary edit was removed afterward.
+- Scoped fixes passed for `codex-app-server-protocol` and `codex-environment-provider`.
+- App-server `just fix` remains blocked by the previously documented unrelated
+  `thread_processor_tests.rs` and `remote_thread_store.rs` compilation errors.
+
 ## Next work
 
-1. Register and wire experimental `environmentProvider/delete` through the deletion service.
-2. Begin delivery stage 3 environment lifecycle APIs and runtime orchestration with a fake adapter.
+1. Define delivery stage 3 environment lifecycle API payloads.
+2. Add runtime orchestration and a fake adapter for create/read/list/delete behavior.
+3. Implement the Ona adapter and replace the no-adapter app-server deletion factory.
 
 This file will be updated after each subsequent milestone is committed.
