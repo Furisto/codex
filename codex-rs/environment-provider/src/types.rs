@@ -7,6 +7,109 @@ pub enum EnvironmentProviderKind {
     Ona,
 }
 
+/// A Personal Access Token whose debug representation never exposes its value.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PersonalAccessToken(String);
+
+impl PersonalAccessToken {
+    /// Creates a non-empty PAT.
+    pub fn new(token: String) -> Result<Self, &'static str> {
+        if token.is_empty() {
+            Err("personal access token must not be empty")
+        } else {
+            Ok(Self(token))
+        }
+    }
+
+    /// Exposes the PAT to an authenticated provider operation.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for PersonalAccessToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PersonalAccessToken([REDACTED])")
+    }
+}
+
+/// Authentication supplied when creating or updating a provider definition.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnvironmentProviderAuthenticationInput {
+    /// Personal Access Token authentication.
+    Pat(PersonalAccessToken),
+}
+
+/// Redacted authentication metadata returned with a provider definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnvironmentProviderAuthentication {
+    /// Personal Access Token authentication is configured.
+    Pat,
+}
+
+/// User-visible environment provider metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentProvider {
+    /// Stable opaque provider ID.
+    pub id: String,
+    /// User-visible display name.
+    pub name: String,
+    /// Provider kind.
+    pub kind: EnvironmentProviderKind,
+    /// Resolved control-plane URL, or `None` for the built-in static provider.
+    pub url: Option<String>,
+    /// Redacted authentication metadata, or `None` for the built-in static provider.
+    pub authentication: Option<EnvironmentProviderAuthentication>,
+}
+
+/// Provider creation input accepted by the provider configuration service.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentProviderServiceCreateParams {
+    /// Unique display name.
+    pub name: String,
+    /// Dynamic provider kind. The built-in static kind is rejected.
+    pub kind: EnvironmentProviderKind,
+    /// Optional control-plane URL. Provider-specific defaults are resolved before persistence.
+    pub url: Option<String>,
+    /// Provider authentication.
+    pub authentication: EnvironmentProviderAuthenticationInput,
+}
+
+/// Provider update input accepted by the provider configuration service.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentProviderServiceUpdateParams {
+    /// Stable provider ID.
+    pub id: String,
+    /// Replacement display name, or `None` to preserve it.
+    pub name: Option<String>,
+    /// Replacement authentication, or `None` to preserve it.
+    pub authentication: Option<EnvironmentProviderAuthenticationInput>,
+}
+
+/// Cursor-paginated user-visible environment providers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentProviderListPage {
+    /// Providers with the built-in static provider first.
+    pub data: Vec<EnvironmentProvider>,
+    /// Service-owned cursor for the next page, if another page exists.
+    pub next_cursor: Option<String>,
+}
+
+/// A dynamic provider definition with decrypted authentication for provider operations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEnvironmentProviderDefinition {
+    /// Stable opaque provider ID.
+    pub id: String,
+    /// User-visible display name.
+    pub name: String,
+    /// Dynamic provider kind.
+    pub kind: EnvironmentProviderKind,
+    /// Resolved control-plane URL.
+    pub url: String,
+    /// Decrypted authentication for an authenticated provider operation.
+    pub authentication: EnvironmentProviderAuthenticationInput,
+}
+
 /// Versioned ciphertext for a provider credential.
 ///
 /// The encryption key is deliberately not part of this value and must be stored separately in a

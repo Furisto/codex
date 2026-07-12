@@ -2,20 +2,31 @@
 
 mod error;
 mod local;
+mod service_error;
 mod store;
 mod types;
 
 pub use error::EnvironmentProviderStoreError;
 pub use error::EnvironmentProviderStoreResult;
 pub use local::LocalEnvironmentProviderStore;
+pub use service_error::EnvironmentProviderServiceError;
+pub use service_error::EnvironmentProviderServiceResult;
 pub use store::EnvironmentProviderStore;
 pub use store::EnvironmentProviderStoreFuture;
 pub use types::CreateEnvironmentProviderParams;
 pub use types::EncryptedEnvironmentProviderCredential;
+pub use types::EnvironmentProvider;
+pub use types::EnvironmentProviderAuthentication;
+pub use types::EnvironmentProviderAuthenticationInput;
 pub use types::EnvironmentProviderDefinition;
 pub use types::EnvironmentProviderKind;
+pub use types::EnvironmentProviderListPage;
 pub use types::EnvironmentProviderPage;
+pub use types::EnvironmentProviderServiceCreateParams;
+pub use types::EnvironmentProviderServiceUpdateParams;
 pub use types::ListEnvironmentProvidersParams;
+pub use types::PersonalAccessToken;
+pub use types::ResolvedEnvironmentProviderDefinition;
 pub use types::StoredEnvironmentProviderAuthentication;
 pub use types::UpdateEnvironmentProviderParams;
 pub use types::normalize_environment_provider_name;
