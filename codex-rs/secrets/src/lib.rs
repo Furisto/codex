@@ -13,9 +13,12 @@ use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
+mod ciphertext;
 mod local;
 mod sanitizer;
 
+pub use ciphertext::EnvironmentProviderCredentialCipher;
+pub use ciphertext::EnvironmentProviderCredentialCiphertext;
 pub use local::LocalSecretsBackend;
 pub use local::LocalSecretsNamespace;
 pub use sanitizer::redact_secrets;
@@ -181,6 +184,10 @@ pub fn environment_id_from_cwd(cwd: &Path) -> String {
 
 /// Computes the OS keyring account name used to store the local secrets passphrase.
 pub fn compute_keyring_account(codex_home: &Path) -> String {
+    compute_keyring_account_for_namespace(codex_home, "secrets")
+}
+
+fn compute_keyring_account_for_namespace(codex_home: &Path, namespace: &str) -> String {
     let canonical = codex_home
         .canonicalize()
         .unwrap_or_else(|_| codex_home.to_path_buf())
@@ -191,7 +198,7 @@ pub fn compute_keyring_account(codex_home: &Path) -> String {
     let digest = hasher.finalize();
     let hex = format!("{digest:x}");
     let short = hex.get(..16).unwrap_or(hex.as_str());
-    format!("secrets|{short}")
+    format!("{namespace}|{short}")
 }
 
 pub(crate) fn keyring_service() -> &'static str {

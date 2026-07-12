@@ -310,7 +310,7 @@ fn write_file_atomically(path: &Path, contents: &[u8]) -> Result<()> {
     }
 }
 
-fn generate_passphrase() -> Result<SecretString> {
+pub(crate) fn generate_passphrase() -> Result<SecretString> {
     let mut bytes = [0_u8; 32];
     let mut rng = OsRng;
     rng.try_fill_bytes(&mut bytes)
@@ -330,12 +330,18 @@ fn wipe_bytes(bytes: &mut [u8]) {
     compiler_fence(Ordering::SeqCst);
 }
 
-fn encrypt_with_passphrase(plaintext: &[u8], passphrase: &SecretString) -> Result<Vec<u8>> {
+pub(crate) fn encrypt_with_passphrase(
+    plaintext: &[u8],
+    passphrase: &SecretString,
+) -> Result<Vec<u8>> {
     let recipient = ScryptRecipient::new(passphrase.clone());
     encrypt(&recipient, plaintext).context("failed to encrypt secrets file")
 }
 
-fn decrypt_with_passphrase(ciphertext: &[u8], passphrase: &SecretString) -> Result<Vec<u8>> {
+pub(crate) fn decrypt_with_passphrase(
+    ciphertext: &[u8],
+    passphrase: &SecretString,
+) -> Result<Vec<u8>> {
     let identity = ScryptIdentity::new(passphrase.clone());
     decrypt(&identity, ciphertext).context("failed to decrypt secrets file")
 }
