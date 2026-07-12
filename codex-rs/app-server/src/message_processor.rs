@@ -72,6 +72,7 @@ use codex_core::ThreadManager;
 use codex_core::config::Config;
 use codex_environment_provider::EnvironmentLifecycleService;
 use codex_environment_provider::EnvironmentProviderService;
+use codex_environment_provider::OnaEnvironmentProviderAdapterFactory;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
 use codex_goal_extension::GoalService;
@@ -348,8 +349,10 @@ impl MessageProcessor {
                 EnvironmentProviderService::new_local_static_only(config.codex_home.to_path_buf())
             }
         };
-        let environment_lifecycle_service =
-            EnvironmentLifecycleService::without_adapters(environment_provider_service.clone());
+        let environment_lifecycle_service = EnvironmentLifecycleService::new(
+            environment_provider_service.clone(),
+            Arc::new(OnaEnvironmentProviderAdapterFactory::default()),
+        );
         let environment_manager_for_requests = Arc::clone(&environment_manager);
         let environment_manager_for_extensions = Arc::clone(&environment_manager);
         let restriction_product = session_source.restriction_product();
