@@ -41,6 +41,11 @@ pub const HTTP_REQUEST_METHOD: &str = "http/request";
 /// JSON-RPC notification method for streamed executor HTTP response bodies.
 pub const HTTP_REQUEST_BODY_DELTA_METHOD: &str = "http/request/bodyDelta";
 
+/// Protocol version assumed when an older exec server omits version negotiation.
+pub const LEGACY_PROTOCOL_VERSION: u32 = 1;
+/// Latest exec-server protocol version implemented by this crate.
+pub const CURRENT_PROTOCOL_VERSION: u32 = LEGACY_PROTOCOL_VERSION;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ByteChunk(#[serde(with = "base64_bytes")] pub Vec<u8>);
@@ -69,6 +74,12 @@ pub struct InitializeParams {
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResponse {
     pub session_id: String,
+    #[serde(default = "legacy_protocol_version")]
+    pub protocol_version: u32,
+}
+
+fn legacy_protocol_version() -> u32 {
+    LEGACY_PROTOCOL_VERSION
 }
 
 /// Information about an execution/filesystem environment.
@@ -565,11 +576,14 @@ mod base64_bytes {
 
 #[cfg(test)]
 mod tests {
+    use super::CURRENT_PROTOCOL_VERSION;
     use super::EnvironmentInfo;
     use super::ExecExitedNotification;
     use super::ExecParams;
     use super::FsReadFileParams;
     use super::HttpRequestParams;
+    use super::InitializeResponse;
+    use super::LEGACY_PROTOCOL_VERSION;
     use super::ProcessId;
     use super::ShellInfo;
     use codex_file_system::FileSystemSandboxContext;
@@ -578,6 +592,38 @@ mod tests {
     use codex_utils_path_uri::PathUri;
     use pretty_assertions::assert_eq;
     use std::collections::HashMap;
+
+    #[test]
+    fn initialize_response_defaults_missing_protocol_version_to_legacy() {
+        let response: InitializeResponse = serde_json::from_value(serde_json::json!({
+            "sessionId": "legacy-session",
+        }))
+        .expect("legacy initialize response should deserialize");
+
+        assert_eq!(
+            response,
+            InitializeResponse {
+                session_id: "legacy-session".to_string(),
+                protocol_version: LEGACY_PROTOCOL_VERSION,
+            }
+        );
+    }
+
+    #[test]
+    fn initialize_response_serializes_protocol_version() {
+        let response = InitializeResponse {
+            session_id: "current-session".to_string(),
+            protocol_version: CURRENT_PROTOCOL_VERSION,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).expect("initialize response should serialize"),
+            serde_json::json!({
+                "sessionId": "current-session",
+                "protocolVersion": CURRENT_PROTOCOL_VERSION,
+            })
+        );
+    }
 
     #[test]
     fn exec_params_managed_network_context_round_trips_and_defaults_for_legacy_peers() {

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -86,11 +87,13 @@ use crate::protocol::FsWalkResponse;
 use crate::protocol::FsWriteFileParams;
 use crate::protocol::FsWriteFileResponse;
 use crate::protocol::HTTP_REQUEST_BODY_DELTA_METHOD;
+use crate::protocol::HTTP_REQUEST_METHOD;
 use crate::protocol::HttpRequestBodyDeltaNotification;
 use crate::protocol::INITIALIZE_METHOD;
 use crate::protocol::INITIALIZED_METHOD;
 use crate::protocol::InitializeParams;
 use crate::protocol::InitializeResponse;
+use crate::protocol::LEGACY_PROTOCOL_VERSION;
 use crate::protocol::ProcessOutputChunk;
 use crate::protocol::ProcessSignal;
 use crate::protocol::ReadParams;
@@ -204,6 +207,7 @@ struct Inner {
     http_body_streams_write_lock: Mutex<()>,
     http_body_stream_next_id: AtomicU64,
     session_id: OnceLock<String>,
+    protocol_version: AtomicU32,
     reconnect_strategy: Option<ExecServerReconnectStrategy>,
 }
 
@@ -495,6 +499,9 @@ impl ExecServerClient {
                     response.session_id
                 )));
             }
+            self.inner
+                .protocol_version
+                .store(response.protocol_version, Ordering::Release);
             rpc_client
                 .notify(INITIALIZED_METHOD, &serde_json::json!({}))
                 .await?;
@@ -511,6 +518,7 @@ impl ExecServerClient {
     }
 
     pub async fn environment_info(&self) -> Result<EnvironmentInfo, ExecServerError> {
+        self.ensure_operation_supported(ENVIRONMENT_INFO_METHOD)?;
         let rpc_client = self.inner.rpc_client().await?;
         map_rpc_call_result(
             rpc_client
@@ -723,6 +731,11 @@ impl ExecServerClient {
         self.inner.session_id.get().cloned()
     }
 
+    /// Returns the protocol version negotiated with the active exec-server connection.
+    pub fn protocol_version(&self) -> u32 {
+        self.inner.protocol_version.load(Ordering::Acquire)
+    }
+
     fn is_disconnected(&self) -> bool {
         self.inner.is_failed()
     }
@@ -756,6 +769,7 @@ impl ExecServerClient {
             http_body_streams_write_lock: Mutex::new(()),
             http_body_stream_next_id: AtomicU64::new(1),
             session_id,
+            protocol_version: AtomicU32::new(LEGACY_PROTOCOL_VERSION),
             reconnect_strategy,
         });
         let client = Self { inner };
@@ -786,7 +800,46 @@ impl ExecServerClient {
         P: serde::Serialize,
         T: serde::de::DeserializeOwned,
     {
+        self.ensure_operation_supported(method)?;
         map_rpc_call_result(rpc_client.call(method, params).await)
+    }
+
+    fn ensure_operation_supported(&self, method: &str) -> Result<(), ExecServerError> {
+        let minimum_version = minimum_protocol_version(method)?;
+        let protocol_version = self.protocol_version();
+        if protocol_version < minimum_version {
+            return Err(ExecServerError::Protocol(format!(
+                "exec-server operation `{method}` requires protocol version {minimum_version}, connected server uses version {protocol_version}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn minimum_protocol_version(method: &str) -> Result<u32, ExecServerError> {
+    match method {
+        EXEC_METHOD
+        | EXEC_READ_METHOD
+        | EXEC_WRITE_METHOD
+        | EXEC_SIGNAL_METHOD
+        | EXEC_TERMINATE_METHOD
+        | ENVIRONMENT_INFO_METHOD
+        | FS_READ_FILE_METHOD
+        | FS_OPEN_METHOD
+        | FS_READ_BLOCK_METHOD
+        | FS_CLOSE_METHOD
+        | FS_WRITE_FILE_METHOD
+        | FS_CREATE_DIRECTORY_METHOD
+        | FS_GET_METADATA_METHOD
+        | FS_CANONICALIZE_METHOD
+        | FS_READ_DIRECTORY_METHOD
+        | FS_WALK_METHOD
+        | FS_REMOVE_METHOD
+        | FS_COPY_METHOD
+        | HTTP_REQUEST_METHOD => Ok(LEGACY_PROTOCOL_VERSION),
+        _ => Err(ExecServerError::Protocol(format!(
+            "exec-server operation `{method}` has no protocol-version mapping"
+        ))),
     }
 }
 
@@ -1253,6 +1306,7 @@ mod tests {
     use crate::client_api::StdioExecServerConnectArgs;
     use crate::connection::JsonRpcConnection;
     use crate::process::ExecProcessEvent;
+    use crate::protocol::CURRENT_PROTOCOL_VERSION;
     use crate::protocol::EXEC_CLOSED_METHOD;
     use crate::protocol::EXEC_EXITED_METHOD;
     use crate::protocol::EXEC_METHOD;
@@ -1268,6 +1322,7 @@ mod tests {
     use crate::protocol::INITIALIZE_METHOD;
     use crate::protocol::INITIALIZED_METHOD;
     use crate::protocol::InitializeResponse;
+    use crate::protocol::LEGACY_PROTOCOL_VERSION;
     use crate::protocol::ProcessOutputChunk;
     use crate::protocol::ReadResponse;
     use crate::protocol::WriteParams;
@@ -1314,6 +1369,7 @@ mod tests {
                     id: initialize.id,
                     result: serde_json::to_value(InitializeResponse {
                         session_id: "trace-test".to_string(),
+                        protocol_version: CURRENT_PROTOCOL_VERSION,
                     })
                     .expect("initialize response should serialize"),
                 }),
@@ -1460,6 +1516,7 @@ mod tests {
                 id: request.id,
                 result: serde_json::to_value(InitializeResponse {
                     session_id: session_id.to_string(),
+                    protocol_version: CURRENT_PROTOCOL_VERSION,
                 })
                 .expect("initialize response should serialize"),
             }),
@@ -1495,6 +1552,7 @@ mod tests {
         .expect("stdio client should connect");
 
         assert_eq!(client.session_id().as_deref(), Some("stdio-test"));
+        assert_eq!(client.protocol_version(), LEGACY_PROTOCOL_VERSION);
     }
 
     #[cfg(not(windows))]
@@ -1680,6 +1738,7 @@ mod tests {
                     id: request.id,
                     result: serde_json::to_value(InitializeResponse {
                         session_id: "session-1".to_string(),
+                        protocol_version: CURRENT_PROTOCOL_VERSION,
                     })
                     .expect("initialize response should serialize"),
                 }),
@@ -1825,6 +1884,7 @@ mod tests {
                     id: request.id,
                     result: serde_json::to_value(InitializeResponse {
                         session_id: "session-1".to_string(),
+                        protocol_version: CURRENT_PROTOCOL_VERSION,
                     })
                     .expect("initialize response should serialize"),
                 }),
@@ -2105,6 +2165,7 @@ mod tests {
                     id: request.id,
                     result: serde_json::to_value(InitializeResponse {
                         session_id: "session-1".to_string(),
+                        protocol_version: CURRENT_PROTOCOL_VERSION,
                     })
                     .expect("initialize response should serialize"),
                 }),
@@ -2335,6 +2396,7 @@ mod tests {
                     id: request.id,
                     result: serde_json::to_value(InitializeResponse {
                         session_id: "session-1".to_string(),
+                        protocol_version: CURRENT_PROTOCOL_VERSION,
                     })
                     .expect("initialize response should serialize"),
                 }),

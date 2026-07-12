@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use codex_exec_server::CURRENT_PROTOCOL_VERSION;
 use codex_exec_server::ExecServerClient;
 use codex_exec_server::HttpHeader;
 use codex_exec_server::HttpRedirectPolicy;
@@ -1038,6 +1039,7 @@ impl JsonRpcPeer {
             request.id,
             InitializeResponse {
                 session_id: "session-1".to_string(),
+                protocol_version: CURRENT_PROTOCOL_VERSION,
             },
         )
         .await?;

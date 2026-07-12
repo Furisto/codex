@@ -25,6 +25,7 @@ use tokio_tungstenite::tungstenite::Message;
 use super::*;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
 use crate::client_api::ExecServerTransportParams;
+use crate::protocol::CURRENT_PROTOCOL_VERSION;
 use crate::protocol::FS_READ_FILE_METHOD;
 use crate::protocol::FsReadFileParams;
 use crate::protocol::FsReadFileResponse;
@@ -153,6 +154,7 @@ async fn complete_websocket_initialize(websocket: &mut WebSocketStream<TcpStream
             id: request.id,
             result: serde_json::to_value(InitializeResponse {
                 session_id: "session-1".to_string(),
+                protocol_version: CURRENT_PROTOCOL_VERSION,
             })
             .expect("initialize response should serialize"),
         }),
