@@ -483,9 +483,34 @@ Verification:
   refinement.
 - `just fix -p codex-environment-provider` passed.
 
+### 20. Reconnectable provider watch runner
+
+Commit: `0de8bdd3c0 Reconnect environment provider watches` (pushed to `ts/env-provider`)
+
+- Added a watch runner for one configured provider adapter and its in-memory reconciler.
+- Required every watch connection attempt to complete authoritative full reconciliation before
+  opening the provider event stream, recovering changes missed while disconnected.
+- Routed normalized lifecycle changes through a bounded Tokio channel so a slow consumer applies
+  backpressure rather than allowing unbounded buffering.
+- Read complete records after changed signals through the reconciler and emitted only deduplicated
+  created, updated, or deleted events.
+- Treated provider errors and cleanly ended streams as reconnectable failures with capped
+  exponential retry delays.
+- Stopped the runner permanently when its event receiver closes, giving the future task owner a
+  clean shutdown mechanism in addition to task cancellation.
+- Added fake-watch coverage proving initial reconciliation precedes signals, a second connection
+  reconciles missed resources before resuming events, ended streams reconnect, and closed event
+  consumers stop delivery.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 25/25 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after enabling Tokio time support; no lockfile content changed.
+
 ## Next work
 
-1. Add watch task ownership, initial/reconnect reconciliation, and lifecycle event delivery.
+1. Add process-scoped watch task ownership and lifecycle event delivery.
 2. Implement execution projection, provider connectors, and PAT-driven watch/connector
    replacement.
 3. Implement the Ona adapter and replace the no-adapter app-server factory.
