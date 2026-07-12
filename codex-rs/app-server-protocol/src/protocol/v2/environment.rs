@@ -46,3 +46,138 @@ pub struct EnvironmentShellInfo {
     /// Target-native shell executable path or command name.
     pub path: String,
 }
+
+/// Supported environment provider kinds.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum EnvironmentProviderKind {
+    /// The single built-in provider for statically registered environments.
+    Static,
+    /// An Ona environment provider.
+    Ona,
+}
+
+/// Authentication supplied when creating or updating an environment provider.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum EnvironmentProviderAuthenticationParams {
+    /// Personal Access Token authentication.
+    Pat { token: String },
+}
+
+/// Redacted environment provider authentication metadata.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum EnvironmentProviderAuthentication {
+    /// Personal Access Token authentication is configured.
+    Pat,
+}
+
+/// An environment provider visible through the app-server API.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProvider {
+    pub id: String,
+    pub name: String,
+    pub kind: EnvironmentProviderKind,
+    /// Resolved control-plane URL, or `null` for the built-in static provider.
+    pub url: Option<String>,
+    /// Redacted authentication metadata, or `null` for the built-in static provider.
+    pub authentication: Option<EnvironmentProviderAuthentication>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderCreateParams {
+    pub name: String,
+    pub kind: EnvironmentProviderKind,
+    /// Optional provider URL. Omission selects the provider-specific default when available.
+    #[ts(optional = nullable)]
+    pub url: Option<String>,
+    pub authentication: EnvironmentProviderAuthenticationParams,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderCreateResponse {
+    pub provider: EnvironmentProvider,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderUpdateParams {
+    pub provider_id: String,
+    #[ts(optional = nullable)]
+    pub name: Option<String>,
+    #[ts(optional = nullable)]
+    pub authentication: Option<EnvironmentProviderAuthenticationParams>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderUpdateResponse {
+    pub provider: EnvironmentProvider,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderListParams {
+    #[ts(optional = nullable)]
+    pub cursor: Option<String>,
+    #[ts(optional = nullable)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderListResponse {
+    pub data: Vec<EnvironmentProvider>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderDeleteParams {
+    pub provider_id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderDeleteResponse {
+    pub cleanup: EnvironmentProviderCleanup,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct EnvironmentProviderCleanup {
+    pub status: EnvironmentProviderCleanupStatus,
+    pub failed_environment_ids: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum EnvironmentProviderCleanupStatus {
+    Complete,
+    Partial,
+    Unknown,
+}
+
+#[cfg(test)]
+#[path = "environment_tests.rs"]
+mod tests;
