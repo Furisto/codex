@@ -15,6 +15,7 @@ mod service_error;
 mod store;
 mod types;
 mod watch;
+mod watch_manager;
 
 pub use adapter::EnvironmentProviderAdapter;
 pub use adapter::EnvironmentProviderAdapterError;
@@ -76,6 +77,7 @@ pub use types::UpdateEnvironmentProviderParams;
 pub use types::normalize_environment_provider_name;
 pub use watch::EnvironmentWatchError;
 pub use watch::EnvironmentWatchRunner;
+pub use watch_manager::EnvironmentWatchManager;
 
 use adapter::UnavailableEnvironmentProviderAdapterFactory;
 use adapter_pool::EnvironmentProviderAdapterPool;

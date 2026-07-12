@@ -10,6 +10,7 @@ use crate::EnvironmentProviderAdapterPool;
 use crate::EnvironmentProviderDeletionService;
 use crate::EnvironmentProviderService;
 use crate::EnvironmentProviderServiceError;
+use crate::EnvironmentWatchRunner;
 use crate::ListEnvironmentsParams;
 use crate::ProviderOperationLocks;
 use crate::ReadEnvironmentParams;
@@ -76,6 +77,14 @@ impl EnvironmentLifecycleService {
     /// Invalidates a provider adapter after its PAT changes or its definition is removed.
     pub fn invalidate_provider(&self, provider_id: &str) {
         self.adapters.invalidate(provider_id);
+    }
+
+    pub(crate) async fn watch_runner(
+        &self,
+        provider_id: String,
+    ) -> EnvironmentLifecycleServiceResult<EnvironmentWatchRunner> {
+        let adapter = self.adapters.adapter(&provider_id).await?;
+        Ok(EnvironmentWatchRunner::new(provider_id, adapter))
     }
 
     /// Starts asynchronous provisioning and returns the provider's initial complete record.
