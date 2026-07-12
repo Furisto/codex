@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and six
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and seven
 milestones from delivery stage 2 in `.task/plan.md` have been completed and committed.
 
 ## Completed milestones
@@ -214,11 +214,34 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after the crate dependency changes.
 
+### 10. App-server v2 provider payloads
+
+Commit: `1739dc1e0b Define environment provider API payloads`
+
+- Added v2 provider kinds `static` and `ona`.
+- Added explicitly tagged PAT input `{type: "pat", token}` and redacted output `{type: "pat"}`.
+- Added the common provider response with nullable URL and authentication for the built-in static
+  provider.
+- Added create and update params/responses, with URL optional only on create and only name and
+  authentication present on update.
+- Added cursor-paginated list params/response.
+- Added delete params with `force` defaulting to false and cleanup results containing
+  `complete`/`partial`/`unknown` plus failed environment IDs.
+- Kept these as payload definitions only; methods are not registered until handlers enforce the
+  configuration and cleanup semantics.
+- Added wire-format coverage for tagged PAT input, redacted/static output, camelCase fields, and
+  the force default.
+
+Verification:
+
+- `just test -p codex-app-server-protocol`: 254/254 passed.
+- `just fix -p codex-app-server-protocol` passed.
+
 ## Next work
 
-1. Add the experimental app-server v2 provider request/response types and method registration,
-   including tagged PAT input and redacted output.
-2. Wire create, update, and list through the configuration service; wire delete after the provider
-   adapter cleanup abstraction is in place.
+1. Register and wire experimental `environmentProvider/create`, `update`, and `list` through the
+   provider configuration service.
+2. Add the provider adapter cleanup abstraction, then register `environmentProvider/delete` with
+   the accepted normal and force semantics.
 
 This file will be updated after each subsequent milestone is committed.
