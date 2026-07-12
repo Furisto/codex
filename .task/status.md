@@ -287,11 +287,34 @@ Verification:
 - `just fix -p codex-environment-provider` passed.
 - `just bazel-lock-update` passed after adding the stream dependency.
 
+### 13. Provider deletion cleanup orchestration
+
+Commit: `b0dd256287 Enforce environment provider deletion cleanup`
+
+- Added a separate deletion service over provider configuration and the adapter factory.
+- Normal deletion resolves authenticated provider configuration, constructs the adapter, queries
+  the authoritative provider, and removes the definition only when the first page proves it empty.
+- Normal deletion rejects non-empty providers and fails closed on credential, adapter-construction,
+  provider-list, or storage failures.
+- Forced deletion consumes all reachable provider pages, detects repeated cursors, deduplicates
+  environment IDs, and issues deletion requests with concurrency capped at eight.
+- Forced cleanup reports `complete` when enumeration and all deletes succeed, `partial` with sorted
+  known failed IDs when complete enumeration has delete failures, and `unknown` when enumeration or
+  adapter construction is incomplete.
+- Forced deletion still attempts definition removal when no adapter is available or listing fails,
+  and deletes IDs discovered before a later page failure.
+- Static provider deletion is rejected before any cleanup work.
+- Added fake-adapter coverage for empty/non-empty normal deletion, fail-closed list errors, forced
+  complete/partial/unknown results, bounded cleanup behavior, and no-adapter definition removal.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 18/18 passed.
+- `just fix -p codex-environment-provider` passed.
+
 ## Next work
 
-1. Add provider deletion orchestration over the adapter contract with fake-provider coverage for
-   normal fail-closed and forced complete/partial/unknown outcomes.
-2. Register and wire experimental `environmentProvider/delete` only after that cleanup policy is
-   enforced above definition deletion.
+1. Register and wire experimental `environmentProvider/delete` through the deletion service.
+2. Begin delivery stage 3 environment lifecycle APIs and runtime orchestration with a fake adapter.
 
 This file will be updated after each subsequent milestone is committed.
