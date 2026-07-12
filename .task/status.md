@@ -4,8 +4,8 @@ Last updated: 2026-07-12
 
 ## Overall status
 
-Implementation is in progress on branch `ts/env-provider`. The three foundational milestones from
-delivery stage 1 in `.task/plan.md` have been completed and committed.
+Implementation is in progress on branch `ts/env-provider`. Delivery stage 1 is complete, and the
+first milestone from delivery stage 2 in `.task/plan.md` has been completed and committed.
 
 ## Completed milestones
 
@@ -83,10 +83,32 @@ Known test blockers unrelated to this milestone:
   These prevent running the new `environment/add` integration test without changing unrelated
   code.
 
+### 4. Environment provider domain and store contract
+
+Commit: `7e107ed264 Add environment provider store contract`
+
+- Added the dedicated `codex-environment-provider` crate instead of expanding `codex-core`.
+- Added the storage-neutral `EnvironmentProviderStore` trait following the `ThreadStore` pattern,
+  with explicit `Send` futures and create, read, cursor-paginated list, update, and delete methods.
+- Kept the built-in static provider and provider-owned environment state explicitly outside the
+  persistence boundary.
+- Added provider-definition domain types for opaque IDs, immutable kinds and resolved URLs,
+  display and normalized names, and versioned encrypted PAT ciphertext.
+- Limited update parameters structurally to the provider name and encrypted authentication.
+- Documented that store implementations assign IDs, reject persisted static providers, enforce
+  case-insensitive name uniqueness transactionally, and order pages by normalized name and ID.
+- Added the crate to Cargo and Bazel workspace metadata and refreshed both lockfiles.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 1/1 passed.
+- `just fix -p codex-environment-provider` passed.
+- `just bazel-lock-update` passed after installing the repository-pinned Bazelisk launcher.
+
 ## Next work
 
-1. Begin delivery stage 2: introduce the environment-provider domain/store crate and local
-   provider-definition persistence.
+1. Add the state migration and local provider-definition store implementation, including
+   case-insensitive uniqueness and cursor pagination.
 2. Add encrypted PAT storage support, static provider synthesis, and provider CRUD APIs in
    separately committed logical milestones.
 
