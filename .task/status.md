@@ -669,9 +669,38 @@ Verification:
 - `cargo check -p codex-environment-provider` passed after the final bounded-buffer refinement.
 - `just bazel-lock-update` passed after enabling Reqwest streaming; no lockfile content changed.
 
+### 27. Reconnectable provider WebSocket transport
+
+Commit: `4a8adcec3e Reconnect provider WebSocket environments` (pushed to
+`ts/env-provider`)
+
+- Added an exec-server connection-provider boundary that resolves a fresh authenticated WebSocket
+  URL immediately before every physical connection attempt.
+- Added a dynamic WebSocket transport and reconnect strategy alongside the existing static URL and
+  Noise rendezvous strategies.
+- Preserved logical exec-server session resume while replacing short-lived physical connection
+  material on reconnect.
+- Applied the existing provider/registry reconnect backoff to dynamic WebSocket material and
+  connection failures.
+- Added `EnvironmentManager` operations to install/replace connector-backed environments and to
+  remove environments while cancelling unfinished startup work.
+- Kept connector-backed URLs out of debug/environment metadata because the resolved URL may carry
+  short-lived authentication.
+- Added coverage proving separate connection attempts resolve separate URLs and proving replacement
+  and removal cancel superseded startup tasks.
+
+Verification:
+
+- Focused exec-server tests: 2/2 passed for dynamic URL resolution and replacement/removal startup
+  cancellation.
+- `just fix -p codex-exec-server` passed.
+- The full `just test -p codex-exec-server` run executed the new connector test successfully, but
+  finished with 40 unrelated `file_system_unix` failures after the filesystem sandbox helper
+  aborted with `SIGABRT`; 269 tests passed.
+
 ## Next work
 
-1. Implement execution projection and provider connectors, including PAT-driven connector
-   replacement.
+1. Add the provider-domain/Ona connector and project executable lifecycle records into
+   `EnvironmentManager`, including PAT-driven connector replacement.
 
 This file will be updated after each subsequent milestone is committed.
