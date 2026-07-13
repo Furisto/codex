@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use crate::CreateEnvironmentParams;
 use crate::DeleteEnvironmentParams;
 use crate::Environment;
+use crate::EnvironmentConnection;
 use crate::EnvironmentListPage;
 use crate::EnvironmentProviderAdapter;
 use crate::EnvironmentProviderAdapterError;
@@ -31,6 +32,7 @@ use crate::ona::OnaListEnvironmentsRequest;
 use crate::ona::OnaListEnvironmentsResponse;
 use crate::ona::OnaPaginationRequest;
 use crate::ona::OnaWatchEventsResponse;
+use crate::ona::connection_from_ona;
 use crate::ona::create_environment_request;
 use crate::ona::environment_from_ona;
 use crate::ona::event_from_ona;
@@ -194,6 +196,30 @@ impl EnvironmentProviderAdapter for OnaEnvironmentProviderAdapter {
                 )
                 .await?;
             Ok(())
+        })
+    }
+
+    fn connection(
+        &self,
+        params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, EnvironmentConnection> {
+        Box::pin(async move {
+            let environment_id = params.environment_id;
+            let response: OnaGetEnvironmentResponse = self
+                .post(
+                    GET_ENVIRONMENT_PROCEDURE,
+                    &OnaGetEnvironmentRequest {
+                        environment_id: environment_id.clone(),
+                    },
+                    RequestTarget::Environment(environment_id),
+                )
+                .await?;
+            if !is_owned_environment(&self.provider_id, &response.environment) {
+                return Err(EnvironmentProviderAdapterError::EnvironmentNotFound {
+                    environment_id: response.environment.id,
+                });
+            }
+            connection_from_ona(&response.environment)
         })
     }
 

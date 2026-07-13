@@ -1,8 +1,11 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::CreateEnvironmentParams;
 use crate::DeleteEnvironmentParams;
 use crate::Environment;
+use crate::EnvironmentConnection;
 use crate::EnvironmentListPage;
 use crate::EnvironmentProviderAdapterError;
 use crate::EnvironmentProviderAdapterFactory;
@@ -20,6 +23,17 @@ use crate::UnavailableEnvironmentProviderAdapterFactory;
 
 /// Result returned by dynamic environment lifecycle orchestration.
 pub type EnvironmentLifecycleServiceResult<T> = Result<T, EnvironmentLifecycleServiceError>;
+
+/// Future returned by [`EnvironmentConnector`] implementations.
+pub type EnvironmentConnectorFuture<'a> = Pin<
+    Box<dyn Future<Output = EnvironmentLifecycleServiceResult<EnvironmentConnection>> + Send + 'a>,
+>;
+
+/// Resolves fresh provider-specific connection material for one environment.
+pub trait EnvironmentConnector: Send + Sync {
+    /// Resolves material immediately before each physical exec-server connection attempt.
+    fn connection(&self) -> EnvironmentConnectorFuture<'_>;
+}
 
 /// Error returned by dynamic environment lifecycle orchestration.
 #[derive(Debug, thiserror::Error)]
@@ -77,6 +91,19 @@ impl EnvironmentLifecycleService {
     /// Invalidates a provider adapter after its PAT changes or its definition is removed.
     pub fn invalidate_provider(&self, provider_id: &str) {
         self.adapters.invalidate(provider_id);
+    }
+
+    /// Creates a connector that follows adapter invalidation, including PAT replacement.
+    pub fn environment_connector(
+        &self,
+        provider_id: String,
+        environment_id: String,
+    ) -> Arc<dyn EnvironmentConnector> {
+        Arc::new(PooledEnvironmentConnector {
+            adapters: self.adapters.clone(),
+            provider_id,
+            environment_id,
+        })
     }
 
     pub(crate) async fn watch_runner(
@@ -144,6 +171,26 @@ impl EnvironmentLifecycleService {
         let adapter = self.adapters.adapter(&provider_id).await?;
         adapter.delete_environment(params).await?;
         Ok(())
+    }
+}
+
+struct PooledEnvironmentConnector {
+    adapters: EnvironmentProviderAdapterPool,
+    provider_id: String,
+    environment_id: String,
+}
+
+impl EnvironmentConnector for PooledEnvironmentConnector {
+    fn connection(&self) -> EnvironmentConnectorFuture<'_> {
+        Box::pin(async move {
+            let adapter = self.adapters.adapter(&self.provider_id).await?;
+            adapter
+                .connection(ReadEnvironmentParams {
+                    environment_id: self.environment_id.clone(),
+                })
+                .await
+                .map_err(Into::into)
+        })
     }
 }
 

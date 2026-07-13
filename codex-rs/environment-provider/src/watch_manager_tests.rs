@@ -75,6 +75,13 @@ impl EnvironmentProviderAdapter for FakeAdapter {
         Box::pin(async { unreachable!("delete is not used by watch manager tests") })
     }
 
+    fn connection(
+        &self,
+        _params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, crate::EnvironmentConnection> {
+        Box::pin(async { unreachable!("connection is not used by watch manager tests") })
+    }
+
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch> {
         Box::pin(async {
             Ok(Box::pin(stream::pending::<

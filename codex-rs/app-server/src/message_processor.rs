@@ -358,6 +358,7 @@ impl MessageProcessor {
         let environment_watch_worker = EnvironmentWatchWorker::spawn(
             environment_provider_service.clone(),
             environment_lifecycle_service.clone(),
+            Arc::clone(&environment_manager),
             outgoing.clone(),
         );
         let environment_watches = environment_watch_worker.manager();

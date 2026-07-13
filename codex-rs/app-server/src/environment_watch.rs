@@ -7,11 +7,16 @@ use codex_app_server_protocol::EnvironmentDeletedNotification;
 use codex_app_server_protocol::EnvironmentUpdatedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_environment_provider::Environment;
+use codex_environment_provider::EnvironmentConnector;
 use codex_environment_provider::EnvironmentLifecycleEvent;
 use codex_environment_provider::EnvironmentLifecycleService;
 use codex_environment_provider::EnvironmentProviderService;
 use codex_environment_provider::EnvironmentWatchManager;
 use codex_environment_provider::ListEnvironmentProvidersParams;
+use codex_exec_server::EnvironmentManager;
+use codex_exec_server::ExecServerError;
+use codex_exec_server::WebSocketConnectProvider;
+use futures::future::BoxFuture;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -34,12 +39,19 @@ impl EnvironmentWatchWorker {
     pub(crate) fn spawn(
         providers: EnvironmentProviderService,
         lifecycle: EnvironmentLifecycleService,
+        environment_manager: Arc<EnvironmentManager>,
         outgoing: Arc<OutgoingMessageSender>,
     ) -> Self {
         let (events_tx, events_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
-        let manager = EnvironmentWatchManager::new(lifecycle, events_tx);
+        let manager = EnvironmentWatchManager::new(lifecycle.clone(), events_tx);
         let shutdown = CancellationToken::new();
-        let event_task = tokio::spawn(deliver_events(events_rx, outgoing, shutdown.child_token()));
+        let event_task = tokio::spawn(deliver_events(
+            events_rx,
+            lifecycle,
+            environment_manager,
+            outgoing,
+            shutdown.child_token(),
+        ));
         let startup_task = tokio::spawn(start_configured_providers(
             providers,
             manager.clone(),
@@ -107,6 +119,8 @@ async fn start_configured_providers(
 
 async fn deliver_events(
     mut events: mpsc::Receiver<EnvironmentLifecycleEvent>,
+    lifecycle: EnvironmentLifecycleService,
+    environment_manager: Arc<EnvironmentManager>,
     outgoing: Arc<OutgoingMessageSender>,
     shutdown: CancellationToken,
 ) {
@@ -122,6 +136,7 @@ async fn deliver_events(
         let Some(event) = apply_event(&mut projection, event) else {
             continue;
         };
+        project_execution_environment(&lifecycle, &environment_manager, &event);
         let notification = match event {
             EnvironmentLifecycleEvent::Created(environment) => {
                 ServerNotification::EnvironmentCreated(EnvironmentCreatedNotification {
@@ -143,6 +158,65 @@ async fn deliver_events(
             }
         };
         outgoing.send_server_notification(notification).await;
+    }
+}
+
+fn project_execution_environment(
+    lifecycle: &EnvironmentLifecycleService,
+    environment_manager: &EnvironmentManager,
+    event: &EnvironmentLifecycleEvent,
+) {
+    match event {
+        EnvironmentLifecycleEvent::Created(environment)
+        | EnvironmentLifecycleEvent::Updated(environment) => {
+            let qualified_id = format!(
+                "{}/{}",
+                environment.environment_ref.provider_id, environment.environment_ref.environment_id
+            );
+            if environment.status.phase == codex_environment_provider::EnvironmentPhase::Running {
+                let connector = lifecycle.environment_connector(
+                    environment.environment_ref.provider_id.clone(),
+                    environment.environment_ref.environment_id.clone(),
+                );
+                if let Err(error) = environment_manager.upsert_dynamic_websocket_environment(
+                    qualified_id,
+                    Arc::new(ExecServerEnvironmentConnector { connector }),
+                ) {
+                    warn!("failed to project provider environment for execution: {error}");
+                }
+            } else if let Err(error) = environment_manager.remove_environment(&qualified_id) {
+                warn!("failed to remove non-running provider environment: {error}");
+            }
+        }
+        EnvironmentLifecycleEvent::Deleted(environment_ref) => {
+            let qualified_id = format!(
+                "{}/{}",
+                environment_ref.provider_id, environment_ref.environment_id
+            );
+            if let Err(error) = environment_manager.remove_environment(&qualified_id) {
+                warn!("failed to remove deleted provider environment: {error}");
+            }
+        }
+    }
+}
+
+struct ExecServerEnvironmentConnector {
+    connector: Arc<dyn EnvironmentConnector>,
+}
+
+impl WebSocketConnectProvider for ExecServerEnvironmentConnector {
+    fn websocket_url(&self) -> BoxFuture<'_, Result<String, ExecServerError>> {
+        Box::pin(async move {
+            self.connector
+                .connection()
+                .await
+                .map(|connection| connection.websocket_url)
+                .map_err(|error| {
+                    ExecServerError::Protocol(format!(
+                        "failed to resolve provider environment connection: {error}"
+                    ))
+                })
+        })
     }
 }
 

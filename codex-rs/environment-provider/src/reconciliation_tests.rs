@@ -69,6 +69,13 @@ impl EnvironmentProviderAdapter for FakeAdapter {
         })
     }
 
+    fn connection(
+        &self,
+        _params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, crate::EnvironmentConnection> {
+        Box::pin(async { unreachable!("connection is not used by reconciliation tests") })
+    }
+
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch> {
         Box::pin(async {
             Ok(Box::pin(stream::empty::<

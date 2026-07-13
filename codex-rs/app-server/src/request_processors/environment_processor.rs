@@ -202,6 +202,11 @@ impl EnvironmentRequestProcessor {
             .await
             .map_err(provider_deletion_error)?;
         self.environment_watches.stop_provider(&provider_id);
+        for environment_id in self.environment_manager.environment_ids() {
+            if environment_id.starts_with(&format!("{provider_id}/")) {
+                let _ = self.environment_manager.remove_environment(&environment_id);
+            }
+        }
         Ok(Some(
             EnvironmentProviderDeleteResponse {
                 cleanup: codex_app_server_protocol::EnvironmentProviderCleanup {

@@ -122,6 +122,17 @@ impl EnvironmentProviderAdapter for FakeAdapter {
         Box::pin(async { Ok(()) })
     }
 
+    fn connection(
+        &self,
+        _params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, crate::EnvironmentConnection> {
+        Box::pin(async {
+            Ok(crate::EnvironmentConnection {
+                websocket_url: "wss://example.com/exec".to_string(),
+            })
+        })
+    }
+
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch> {
         Box::pin(async {
             Ok(Box::pin(stream::empty::<
@@ -271,20 +282,18 @@ async fn lifecycle_routes_authoritative_operations_through_one_adapter() {
 #[tokio::test]
 async fn lifecycle_invalidates_adapters_and_shares_them_with_provider_deletion() {
     let fixture = test_fixture().await;
-    let read = ReadEnvironmentParams {
-        environment_id: "read".to_string(),
-    };
-    fixture
+    let connector = fixture
         .lifecycle
-        .read_environment(fixture.provider_id.clone(), read.clone())
+        .environment_connector(fixture.provider_id.clone(), "read".to_string());
+    connector
+        .connection()
         .await
-        .expect("initial read should succeed");
+        .expect("initial connection should succeed");
     fixture.lifecycle.invalidate_provider(&fixture.provider_id);
-    fixture
-        .lifecycle
-        .read_environment(fixture.provider_id.clone(), read)
+    connector
+        .connection()
         .await
-        .expect("read after invalidation should recreate the adapter");
+        .expect("connection after invalidation should recreate the adapter");
     assert_eq!(fixture.factory_calls.load(Ordering::SeqCst), 2);
 
     assert_eq!(

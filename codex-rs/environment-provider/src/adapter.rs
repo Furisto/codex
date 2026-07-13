@@ -7,6 +7,7 @@ use futures::Stream;
 use crate::CreateEnvironmentParams;
 use crate::DeleteEnvironmentParams;
 use crate::Environment;
+use crate::EnvironmentConnection;
 use crate::EnvironmentListPage;
 use crate::EnvironmentProviderEvent;
 use crate::ListEnvironmentsParams;
@@ -74,6 +75,12 @@ pub trait EnvironmentProviderAdapter: Send + Sync {
         &self,
         params: DeleteEnvironmentParams,
     ) -> EnvironmentProviderAdapterFuture<'_, ()>;
+
+    /// Resolves fresh exec-server connection material for a ready environment.
+    fn connection(
+        &self,
+        params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, EnvironmentConnection>;
 
     /// Opens the provider's single event watch for this configured definition.
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch>;

@@ -40,6 +40,15 @@ async fn ona_adapter_routes_authenticated_create_read_and_delete_calls() {
         .mount(&server)
         .await;
     Mock::given(method("POST"))
+        .and(path(format!("/{GET_ENVIRONMENT_PROCEDURE}")))
+        .and(body_json(json!({"environmentId": "connect"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "environment": owned_environment_with_url("connect", Some("wss://exec.example/connect"))
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
         .and(path(format!("/{DELETE_ENVIRONMENT_PROCEDURE}")))
         .and(body_json(
             json!({"environmentId": "delete", "force": false}),
@@ -82,6 +91,17 @@ async fn ona_adapter_routes_authenticated_create_read_and_delete_calls() {
         })
         .await
         .expect("delete should succeed");
+    assert_eq!(
+        adapter
+            .connection(ReadEnvironmentParams {
+                environment_id: "connect".to_string(),
+            })
+            .await
+            .expect("connection should resolve"),
+        EnvironmentConnection {
+            websocket_url: "wss://exec.example/connect".to_string(),
+        }
+    );
 }
 
 #[tokio::test]
@@ -206,6 +226,13 @@ async fn adapter(server: &MockServer) -> Arc<dyn EnvironmentProviderAdapter> {
 }
 
 fn owned_environment(environment_id: &str) -> serde_json::Value {
+    owned_environment_with_url(environment_id, None)
+}
+
+fn owned_environment_with_url(
+    environment_id: &str,
+    exec_server_url: Option<&str>,
+) -> serde_json::Value {
     json!({
         "id": environment_id,
         "metadata": {"annotations": {
@@ -220,7 +247,10 @@ fn owned_environment(environment_id: &str) -> serde_json::Value {
                 "cloneTarget": "main"
             }}]}}
         },
-        "status": {"phase": "ENVIRONMENT_PHASE_RUNNING"}
+        "status": {
+            "phase": "ENVIRONMENT_PHASE_RUNNING",
+            "execServerUrl": exec_server_url
+        }
     })
 }
 

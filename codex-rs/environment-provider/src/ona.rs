@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::CreateEnvironmentParams;
 use crate::Environment;
+use crate::EnvironmentConnection;
 use crate::EnvironmentPhase;
 use crate::EnvironmentProviderAdapterError;
 use crate::EnvironmentProviderAdapterResult;
@@ -119,7 +120,7 @@ enum OnaResourceOperation {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OnaEnvironment {
-    id: String,
+    pub(crate) id: String,
     #[serde(default)]
     metadata: Option<OnaEnvironmentMetadata>,
     #[serde(default)]
@@ -193,6 +194,8 @@ struct OnaEnvironmentStatus {
     phase: Option<OnaEnvironmentPhase>,
     #[serde(default)]
     failure_message: Vec<String>,
+    #[serde(default)]
+    exec_server_url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -331,6 +334,23 @@ pub(crate) fn environment_from_ona(
             error: (!status.failure_message.is_empty()).then(|| status.failure_message.join("; ")),
         },
     })
+}
+
+pub(crate) fn connection_from_ona(
+    environment: &OnaEnvironment,
+) -> EnvironmentProviderAdapterResult<EnvironmentConnection> {
+    let websocket_url = environment
+        .status
+        .as_ref()
+        .and_then(|status| status.exec_server_url.clone())
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| EnvironmentProviderAdapterError::Unavailable {
+            message: format!(
+                "Ona environment {} does not expose an exec-server URL",
+                environment.id
+            ),
+        })?;
+    Ok(EnvironmentConnection { websocket_url })
 }
 
 pub(crate) fn is_owned_environment(provider_id: &str, environment: &OnaEnvironment) -> bool {

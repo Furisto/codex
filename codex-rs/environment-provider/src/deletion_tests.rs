@@ -374,6 +374,13 @@ impl EnvironmentProviderAdapter for FakeAdapter {
         })
     }
 
+    fn connection(
+        &self,
+        _params: ReadEnvironmentParams,
+    ) -> EnvironmentProviderAdapterFuture<'_, crate::EnvironmentConnection> {
+        Box::pin(async { Err(unused_operation()) })
+    }
+
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch> {
         Box::pin(async {
             let watch: EnvironmentProviderWatch = Box::pin(stream::empty());

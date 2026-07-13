@@ -86,6 +86,12 @@ pub struct EnvironmentListPage {
     pub next_cursor: Option<String>,
 }
 
+/// Fresh provider-specific material for one exec-server connection attempt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvironmentConnection {
+    pub websocket_url: String,
+}
+
 /// Resource signal emitted by a provider watch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EnvironmentProviderEvent {
