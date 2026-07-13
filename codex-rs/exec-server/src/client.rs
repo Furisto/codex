@@ -381,6 +381,7 @@ impl LazyRemoteExecServerClient {
         matches!(
             self.transport_params,
             ExecServerTransportParams::WebSocketUrl { .. }
+                | ExecServerTransportParams::DynamicWebSocket { .. }
                 | ExecServerTransportParams::NoiseRendezvous { .. }
         )
     }

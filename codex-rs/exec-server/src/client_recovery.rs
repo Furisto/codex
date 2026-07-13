@@ -309,7 +309,10 @@ impl Inner {
         };
         let uses_registry_backoff = matches!(
             self.reconnect_strategy.as_ref(),
-            Some(ExecServerReconnectStrategy::NoiseRendezvous { .. })
+            Some(
+                ExecServerReconnectStrategy::DynamicWebSocket { .. }
+                    | ExecServerReconnectStrategy::NoiseRendezvous { .. }
+            )
         );
         let mut registry_retry_attempt = 0;
         let last_error = loop {

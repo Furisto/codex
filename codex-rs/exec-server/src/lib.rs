@@ -41,6 +41,7 @@ pub use client_api::NoiseRendezvousConnectArgs;
 pub use client_api::NoiseRendezvousConnectBundle;
 pub use client_api::NoiseRendezvousConnectProvider;
 pub use client_api::RemoteExecServerConnectArgs;
+pub use client_api::WebSocketConnectProvider;
 pub use codex_exec_server_protocol::ProcessId;
 pub use codex_file_system::CopyOptions;
 pub use codex_file_system::CreateDirectoryOptions;

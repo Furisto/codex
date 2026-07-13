@@ -18,6 +18,7 @@ use crate::ExecutorFileSystem;
 use crate::HttpClient;
 use crate::NoiseChannelIdentity;
 use crate::NoiseRendezvousConnectProvider;
+use crate::WebSocketConnectProvider;
 use crate::client::LazyRemoteExecServerClient;
 use crate::client::http_client::ReqwestHttpClient;
 use crate::client_api::DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT;
@@ -338,6 +339,46 @@ impl EnvironmentManager {
         Ok(())
     }
 
+    /// Adds or replaces an environment whose provider supplies fresh authenticated WebSocket URLs.
+    pub fn upsert_dynamic_websocket_environment(
+        &self,
+        environment_id: String,
+        provider: Arc<dyn WebSocketConnectProvider>,
+    ) -> Result<(), ExecServerError> {
+        let environment_id = canonical_environment_id(&environment_id)?;
+        if environment_id == LOCAL_ENVIRONMENT_ID {
+            return Err(ExecServerError::Protocol(format!(
+                "environment id `{LOCAL_ENVIRONMENT_ID}` is reserved for EnvironmentManager"
+            )));
+        }
+        let environment = Arc::new(Environment::remote_with_transport(
+            ExecServerTransportParams::DynamicWebSocket { provider },
+            self.local_runtime_paths.clone(),
+        ));
+        environment.start_connecting();
+        self.environments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(environment_id, environment);
+        Ok(())
+    }
+
+    /// Removes a canonical or legacy-static environment and cancels its unfinished startup work.
+    pub fn remove_environment(&self, environment_id: &str) -> Result<bool, ExecServerError> {
+        let environment_id = canonical_environment_id(environment_id)?;
+        if environment_id == LOCAL_ENVIRONMENT_ID {
+            return Err(ExecServerError::Protocol(format!(
+                "environment id `{LOCAL_ENVIRONMENT_ID}` is reserved for EnvironmentManager"
+            )));
+        }
+        Ok(self
+            .environments
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&environment_id)
+            .is_some())
+    }
+
     /// Adds or replaces a named remote environment that connects through an
     /// authenticated, end-to-end encrypted rendezvous stream.
     ///
@@ -527,6 +568,7 @@ impl Environment {
                 websocket_url: exec_server_url,
                 ..
             } => Some(exec_server_url.clone()),
+            ExecServerTransportParams::DynamicWebSocket { .. } => None,
             ExecServerTransportParams::NoiseRendezvous { .. } => None,
             ExecServerTransportParams::StdioCommand { .. } => None,
         };
@@ -1187,6 +1229,18 @@ mod tests {
             )
             .expect("replacement remote environment");
 
+        let replacement = manager
+            .get_environment("executor-a")
+            .expect("replacement remote environment");
+        let replacement_abort = replacement
+            .startup_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .expect("replacement startup task")
+            .abort_handle();
+        drop(replacement);
+
         timeout(Duration::from_secs(1), async {
             while !startup_abort.is_finished() {
                 tokio::task::yield_now().await;
@@ -1194,6 +1248,20 @@ mod tests {
         })
         .await
         .expect("replacing the environment should cancel its startup task");
+
+        assert!(
+            manager
+                .remove_environment("executor-a")
+                .expect("environment removal should be valid")
+        );
+        timeout(Duration::from_secs(1), async {
+            while !replacement_abort.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("removing the environment should cancel its startup task");
+        assert!(manager.get_environment("executor-a").is_none());
     }
 
     #[tokio::test]

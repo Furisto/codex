@@ -16,6 +16,25 @@ use crate::NoiseChannelIdentity;
 use crate::NoiseChannelPublicKey;
 use crate::NoiseRendezvousConnectBundle;
 use crate::NoiseRendezvousConnectProvider;
+use crate::WebSocketConnectProvider;
+
+struct SequenceWebSocketConnectProvider {
+    urls: Mutex<VecDeque<String>>,
+}
+
+impl WebSocketConnectProvider for SequenceWebSocketConnectProvider {
+    fn websocket_url(&self) -> BoxFuture<'_, Result<String, ExecServerError>> {
+        let result = self
+            .urls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .ok_or_else(|| {
+                ExecServerError::Protocol("test WebSocket provider exhausted".to_string())
+            });
+        Box::pin(async move { result })
+    }
+}
 
 struct SequenceNoiseConnectProvider {
     bundles: Mutex<VecDeque<NoiseRendezvousConnectBundle>>,
@@ -108,5 +127,47 @@ async fn initial_noise_connection_refreshes_bundle_after_unauthorized_handshake(
     );
     unauthorized_server.await??;
     accepted_server.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn dynamic_websocket_connection_resolves_fresh_provider_url() -> Result<()> {
+    let first_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let first_url = format!("ws://{}", first_listener.local_addr()?);
+    let first_server = tokio::spawn(async move {
+        let (socket, _) = first_listener.accept().await?;
+        let _websocket = accept_async(socket).await?;
+        anyhow::Ok(())
+    });
+    let second_listener = TcpListener::bind("127.0.0.1:0").await?;
+    let second_url = format!("ws://{}", second_listener.local_addr()?);
+    let second_server = tokio::spawn(async move {
+        let (socket, _) = second_listener.accept().await?;
+        let _websocket = accept_async(socket).await?;
+        anyhow::Ok(())
+    });
+    let provider: Arc<dyn WebSocketConnectProvider> = Arc::new(SequenceWebSocketConnectProvider {
+        urls: Mutex::new(vec![first_url, second_url].into()),
+    });
+
+    let _first = ExecServerClient::open_dynamic_websocket_connection(
+        &provider,
+        "test",
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(1),
+        /*resume_session_id*/ None,
+    )
+    .await?;
+    let _second = ExecServerClient::open_dynamic_websocket_connection(
+        &provider,
+        "test",
+        std::time::Duration::from_secs(1),
+        std::time::Duration::from_secs(1),
+        Some("session".to_string()),
+    )
+    .await?;
+
+    first_server.await??;
+    second_server.await??;
     Ok(())
 }

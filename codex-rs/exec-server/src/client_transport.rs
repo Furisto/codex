@@ -25,6 +25,7 @@ use crate::client_api::NoiseRendezvousConnectProvider;
 use crate::client_api::RemoteExecServerConnectArgs;
 use crate::client_api::StdioExecServerCommand;
 use crate::client_api::StdioExecServerConnectArgs;
+use crate::client_api::WebSocketConnectProvider;
 use crate::connection::JsonRpcConnection;
 use crate::noise_channel::NoiseChannelIdentity;
 use crate::noise_relay::NoiseHarnessConnectionArgs;
@@ -43,6 +44,12 @@ const ENVIRONMENT_CLIENT_NAME: &str = "codex-environment";
 #[derive(Clone)]
 pub(crate) enum ExecServerReconnectStrategy {
     WebSocket(RemoteExecServerConnectArgs),
+    DynamicWebSocket {
+        provider: Arc<dyn WebSocketConnectProvider>,
+        client_name: String,
+        connect_timeout: Duration,
+        initialize_timeout: Duration,
+    },
     NoiseRendezvous {
         provider: Arc<dyn NoiseRendezvousConnectProvider>,
         identity: NoiseChannelIdentity,
@@ -63,6 +70,21 @@ impl ExecServerReconnectStrategy {
                 args.resume_session_id = Some(session_id.to_string());
                 let connection = ExecServerClient::open_websocket_connection(&args).await?;
                 Ok((connection, args.into()))
+            }
+            Self::DynamicWebSocket {
+                provider,
+                client_name,
+                connect_timeout,
+                initialize_timeout,
+            } => {
+                ExecServerClient::open_dynamic_websocket_connection(
+                    provider,
+                    client_name,
+                    *connect_timeout,
+                    *initialize_timeout,
+                    Some(session_id.to_string()),
+                )
+                .await
             }
             Self::NoiseRendezvous {
                 provider,
@@ -108,6 +130,23 @@ impl ExecServerClient {
                 })
                 .await
             }
+            crate::client_api::ExecServerTransportParams::DynamicWebSocket { provider } => {
+                let reconnect_strategy = ExecServerReconnectStrategy::DynamicWebSocket {
+                    provider: Arc::clone(&provider),
+                    client_name: ENVIRONMENT_CLIENT_NAME.to_string(),
+                    connect_timeout: DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT,
+                    initialize_timeout: DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT,
+                };
+                let (connection, options) = Self::open_dynamic_websocket_connection(
+                    &provider,
+                    ENVIRONMENT_CLIENT_NAME,
+                    DEFAULT_REMOTE_EXEC_SERVER_CONNECT_TIMEOUT,
+                    DEFAULT_REMOTE_EXEC_SERVER_INITIALIZE_TIMEOUT,
+                    /*resume_session_id*/ None,
+                )
+                .await?;
+                Self::connect_with_recovery(connection, options, Some(reconnect_strategy)).await
+            }
             crate::client_api::ExecServerTransportParams::NoiseRendezvous {
                 provider,
                 identity,
@@ -136,6 +175,24 @@ impl ExecServerClient {
                 .await
             }
         }
+    }
+
+    async fn open_dynamic_websocket_connection(
+        provider: &Arc<dyn WebSocketConnectProvider>,
+        client_name: &str,
+        connect_timeout: Duration,
+        initialize_timeout: Duration,
+        resume_session_id: Option<String>,
+    ) -> Result<(JsonRpcConnection, ExecServerClientConnectOptions), ExecServerError> {
+        let args = RemoteExecServerConnectArgs {
+            websocket_url: provider.websocket_url().await?,
+            client_name: client_name.to_string(),
+            connect_timeout,
+            initialize_timeout,
+            resume_session_id,
+        };
+        let connection = Self::open_websocket_connection(&args).await?;
+        Ok((connection, args.into()))
     }
 
     async fn open_initial_noise_rendezvous_connection(

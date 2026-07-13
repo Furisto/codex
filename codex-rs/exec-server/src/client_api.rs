@@ -70,6 +70,12 @@ pub trait NoiseRendezvousConnectProvider: Send + Sync {
     ) -> BoxFuture<'_, Result<NoiseRendezvousConnectBundle, ExecServerError>>;
 }
 
+/// Supplies a fresh provider-authenticated WebSocket URL for each physical connection attempt.
+pub trait WebSocketConnectProvider: Send + Sync {
+    /// Resolves connection material immediately before opening the WebSocket.
+    fn websocket_url(&self) -> BoxFuture<'_, Result<String, ExecServerError>>;
+}
+
 /// Stdio connection arguments for a command-backed exec-server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StdioExecServerConnectArgs {
@@ -96,6 +102,9 @@ pub(crate) enum ExecServerTransportParams {
         connect_timeout: Duration,
         initialize_timeout: Duration,
     },
+    DynamicWebSocket {
+        provider: Arc<dyn WebSocketConnectProvider>,
+    },
     NoiseRendezvous {
         provider: Arc<dyn NoiseRendezvousConnectProvider>,
         identity: NoiseChannelIdentity,
@@ -120,6 +129,9 @@ impl std::fmt::Debug for ExecServerTransportParams {
                 .field("connect_timeout", connect_timeout)
                 .field("initialize_timeout", initialize_timeout)
                 .finish(),
+            Self::DynamicWebSocket { .. } => {
+                f.debug_struct("DynamicWebSocket").finish_non_exhaustive()
+            }
             Self::NoiseRendezvous { .. } => {
                 f.debug_struct("NoiseRendezvous").finish_non_exhaustive()
             }
