@@ -641,10 +641,37 @@ Verification:
   this code by unrelated existing `thread_processor_tests.rs` errors: the stale `SandboxMode` path
   and three `JSONRPCErrorError` conversions to `anyhow::Error`.
 
+### 26. Ona Connect event stream
+
+Commit: `9a59d1d0cd Stream Ona environment lifecycle events` (pushed to
+`ts/env-provider`)
+
+- Implemented Ona's organization-scoped `EventService/WatchEvents` server stream with an
+  environment resource-type filter.
+- Sent PAT authentication, Connect protocol version, streaming content type, and a correctly
+  framed protobuf-JSON request.
+- Added a separate bounded Connect JSON framing decoder for arbitrary HTTP chunk boundaries,
+  standard messages, final EndStream envelopes, and provider-reported stream errors.
+- Rejected compressed/reserved flags, oversized frames/buffers, malformed messages, missing final
+  EndStream envelopes, and buffered data after EndStream.
+- Mapped Ona create, update, and update-status operations to generic changed signals and delete
+  operations to generic deleted signals; reconciliation still reads authoritative complete records
+  and filters ownership locally.
+- The existing watch runner now performs initial reconciliation, consumes real Ona events, and
+  fully reconciles before every reconnect.
+- Added mock-server coverage for the exact authenticated/framed request and streamed operation
+  mapping, plus framing/parser and wire-model coverage.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 36/36 passed.
+- `just fix -p codex-environment-provider` passed.
+- `cargo check -p codex-environment-provider` passed after the final bounded-buffer refinement.
+- `just bazel-lock-update` passed after enabling Reqwest streaming; no lockfile content changed.
+
 ## Next work
 
 1. Implement execution projection and provider connectors, including PAT-driven connector
    replacement.
-2. Finish the Ona event stream.
 
 This file will be updated after each subsequent milestone is committed.
