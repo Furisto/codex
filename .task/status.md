@@ -698,9 +698,36 @@ Verification:
   finished with 40 unrelated `file_system_unix` failures after the filesystem sandbox helper
   aborted with `SIGABRT`; 269 tests passed.
 
+### 28. Provider execution projection and Ona connector
+
+Commit: `5244afc2d0 Project provider environments for execution` (pushed to
+`ts/env-provider`)
+
+- Added a provider-domain connector boundary that returns fresh connection material without
+  exposing it through app-server lifecycle payloads.
+- Implemented pooled connectors that resolve the current adapter on every connection attempt, so
+  PAT invalidation automatically switches existing execution entries to the rebuilt adapter.
+- Added Ona connection resolution that re-reads the authoritative environment immediately before
+  each connection and extracts its short-lived `status.execServerUrl`.
+- Kept running environments in lifecycle APIs even when connection material is absent; selecting
+  one for execution fails explicitly when the connector resolves, as designed.
+- Projected created/updated running provider environments into `EnvironmentManager` using canonical
+  `providerId/environmentId` identities and connector-backed WebSocket transport.
+- Removed non-running, deleted, and provider-deleted environments from the execution projection,
+  cancelling superseded startup work through `EnvironmentManager`.
+- Added adapter and lifecycle coverage for Ona URL extraction and connector behavior across adapter
+  invalidation.
+
+Verification:
+
+- `just test -p codex-environment-provider`: 36/36 passed.
+- `just fix -p codex-environment-provider` passed.
+- `cargo check -p codex-app-server --lib` passed.
+- `cargo clippy -p codex-app-server --lib --no-deps -- -D warnings` passed.
+
 ## Next work
 
-1. Add the provider-domain/Ona connector and project executable lifecycle records into
-   `EnvironmentManager`, including PAT-driven connector replacement.
+1. Run final targeted/schema verification, review the accumulated diff, and resolve any remaining
+   integration gaps before requesting the complete workspace test run.
 
 This file will be updated after each subsequent milestone is committed.
