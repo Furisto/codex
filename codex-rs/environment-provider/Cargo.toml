@@ -16,7 +16,7 @@ workspace = true
 codex-secrets = { workspace = true }
 codex-state = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -119,6 +119,44 @@ fn foreign_and_malformed_ona_environments_fail_closed() {
     ));
 }
 
+#[test]
+fn event_watch_filters_environments_and_maps_operations() {
+    assert_eq!(
+        serde_json::to_value(watch_events_request()).expect("watch request should serialize"),
+        json!({
+            "organization": true,
+            "resourceTypeFilters": [{
+                "resourceType": "RESOURCE_TYPE_ENVIRONMENT"
+            }]
+        })
+    );
+    let changed: OnaWatchEventsResponse = serde_json::from_value(json!({
+        "operation": "RESOURCE_OPERATION_UPDATE_STATUS",
+        "resourceType": "RESOURCE_TYPE_ENVIRONMENT",
+        "resourceId": "changed"
+    }))
+    .expect("changed event should deserialize");
+    let deleted: OnaWatchEventsResponse = serde_json::from_value(json!({
+        "operation": "RESOURCE_OPERATION_DELETE",
+        "resourceType": "RESOURCE_TYPE_ENVIRONMENT",
+        "resourceId": "deleted"
+    }))
+    .expect("deleted event should deserialize");
+
+    assert_eq!(
+        event_from_ona(changed),
+        EnvironmentProviderEvent::Changed {
+            environment_id: "changed".to_string()
+        }
+    );
+    assert_eq!(
+        event_from_ona(deleted),
+        EnvironmentProviderEvent::Deleted {
+            environment_id: "deleted".to_string()
+        }
+    );
+}
+
 fn ona_environment(value: serde_json::Value) -> OnaEnvironment {
     serde_json::from_value(value).expect("Ona environment fixture should deserialize")
 }

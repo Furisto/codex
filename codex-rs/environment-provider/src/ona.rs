@@ -8,6 +8,7 @@ use crate::Environment;
 use crate::EnvironmentPhase;
 use crate::EnvironmentProviderAdapterError;
 use crate::EnvironmentProviderAdapterResult;
+use crate::EnvironmentProviderEvent;
 use crate::EnvironmentRef;
 use crate::EnvironmentSource;
 use crate::EnvironmentStatus;
@@ -74,6 +75,45 @@ pub(crate) struct OnaPaginationResponse {
 pub(crate) struct OnaDeleteEnvironmentRequest {
     pub(crate) environment_id: String,
     pub(crate) force: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaWatchEventsRequest {
+    organization: bool,
+    resource_type_filters: Vec<OnaResourceTypeFilter>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OnaResourceTypeFilter {
+    resource_type: OnaResourceType,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OnaWatchEventsResponse {
+    operation: OnaResourceOperation,
+    resource_type: OnaResourceType,
+    resource_id: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+enum OnaResourceType {
+    #[serde(rename = "RESOURCE_TYPE_ENVIRONMENT")]
+    Environment,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+enum OnaResourceOperation {
+    #[serde(rename = "RESOURCE_OPERATION_CREATE")]
+    Create,
+    #[serde(rename = "RESOURCE_OPERATION_UPDATE")]
+    Update,
+    #[serde(rename = "RESOURCE_OPERATION_DELETE")]
+    Delete,
+    #[serde(rename = "RESOURCE_OPERATION_UPDATE_STATUS")]
+    UpdateStatus,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -210,6 +250,33 @@ pub(crate) fn create_environment_request(
                 params.source.git_ref,
             ),
         ]),
+    }
+}
+
+pub(crate) fn watch_events_request() -> OnaWatchEventsRequest {
+    OnaWatchEventsRequest {
+        organization: true,
+        resource_type_filters: vec![OnaResourceTypeFilter {
+            resource_type: OnaResourceType::Environment,
+        }],
+    }
+}
+
+pub(crate) fn event_from_ona(response: OnaWatchEventsResponse) -> EnvironmentProviderEvent {
+    let OnaWatchEventsResponse {
+        operation,
+        resource_type: OnaResourceType::Environment,
+        resource_id,
+    } = response;
+    match operation {
+        OnaResourceOperation::Create
+        | OnaResourceOperation::Update
+        | OnaResourceOperation::UpdateStatus => EnvironmentProviderEvent::Changed {
+            environment_id: resource_id,
+        },
+        OnaResourceOperation::Delete => EnvironmentProviderEvent::Deleted {
+            environment_id: resource_id,
+        },
     }
 }
 

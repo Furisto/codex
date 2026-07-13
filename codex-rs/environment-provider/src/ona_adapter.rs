@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use futures::StreamExt;
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -20,6 +21,8 @@ use crate::ListEnvironmentsParams;
 use crate::PersonalAccessToken;
 use crate::ReadEnvironmentParams;
 use crate::ResolvedEnvironmentProviderDefinition;
+use crate::connect_json_stream::connect_json_stream;
+use crate::connect_json_stream::encode_connect_json_message;
 use crate::ona::OnaCreateEnvironmentResponse;
 use crate::ona::OnaDeleteEnvironmentRequest;
 use crate::ona::OnaGetEnvironmentRequest;
@@ -27,14 +30,19 @@ use crate::ona::OnaGetEnvironmentResponse;
 use crate::ona::OnaListEnvironmentsRequest;
 use crate::ona::OnaListEnvironmentsResponse;
 use crate::ona::OnaPaginationRequest;
+use crate::ona::OnaWatchEventsResponse;
 use crate::ona::create_environment_request;
 use crate::ona::environment_from_ona;
+use crate::ona::event_from_ona;
 use crate::ona::is_owned_environment;
+use crate::ona::watch_events_request;
 
 const GET_ENVIRONMENT_PROCEDURE: &str = "gitpod.v1.EnvironmentService/GetEnvironment";
 const LIST_ENVIRONMENTS_PROCEDURE: &str = "gitpod.v1.EnvironmentService/ListEnvironments";
 const CREATE_ENVIRONMENT_PROCEDURE: &str = "gitpod.v1.EnvironmentService/CreateEnvironment";
 const DELETE_ENVIRONMENT_PROCEDURE: &str = "gitpod.v1.EnvironmentService/DeleteEnvironment";
+const WATCH_EVENTS_PROCEDURE: &str = "gitpod.v1.EventService/WatchEvents";
+const CONNECT_JSON_CONTENT_TYPE: &str = "application/connect+json";
 const MAX_ONA_PAGE_SIZE: usize = 100;
 const MAX_ERROR_BODY_CHARS: usize = 1_000;
 
@@ -190,10 +198,31 @@ impl EnvironmentProviderAdapter for OnaEnvironmentProviderAdapter {
     }
 
     fn watch(&self) -> EnvironmentProviderAdapterFuture<'_, EnvironmentProviderWatch> {
-        Box::pin(async {
-            Err(EnvironmentProviderAdapterError::Unavailable {
-                message: "the Ona event watch is not implemented yet".to_string(),
-            })
+        Box::pin(async move {
+            let response = self
+                .client
+                .post(format!("{}/{WATCH_EVENTS_PROCEDURE}", self.base_url))
+                .bearer_auth(self.token.expose())
+                .header("Connect-Protocol-Version", "1")
+                .header(reqwest::header::CONTENT_TYPE, CONNECT_JSON_CONTENT_TYPE)
+                .body(encode_connect_json_message(&watch_events_request())?)
+                .send()
+                .await
+                .map_err(|error| EnvironmentProviderAdapterError::Unavailable {
+                    message: format!("Ona event watch failed: {error}"),
+                })?;
+            let status = response.status();
+            if !status.is_success() {
+                let body = response.text().await.map_err(|error| {
+                    EnvironmentProviderAdapterError::Unavailable {
+                        message: format!("failed to read Ona event watch response: {error}"),
+                    }
+                })?;
+                return Err(response_error(status, body, RequestTarget::Provider));
+            }
+            let watch = connect_json_stream::<OnaWatchEventsResponse>(response)
+                .map(|event| event.map(event_from_ona));
+            Ok(Box::pin(watch) as EnvironmentProviderWatch)
         })
     }
 }

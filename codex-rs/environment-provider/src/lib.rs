@@ -2,6 +2,7 @@
 
 mod adapter;
 mod adapter_pool;
+mod connect_json_stream;
 mod deletion;
 mod error;
 mod lifecycle;
